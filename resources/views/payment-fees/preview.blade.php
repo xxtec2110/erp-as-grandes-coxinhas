@@ -1,0 +1,7 @@
+@extends('layouts.app')
+@section('title', 'Prévia das taxas')
+@section('content')
+<div class="page-header"><div><h1 class="page-title">Prévia da atualização</h1><p class="page-subtitle">Nenhuma taxa foi alterada até este momento.</p></div></div>
+<div class="table-card"><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Bandeira</th><th>Modalidade</th><th>Atual</th><th>Novo</th><th>Tarifa fixa</th></tr></thead><tbody>@foreach($import->parsed_payload['rows'] as $row) @php($key=implode(':',[$row['acquirer_id'],$row['card_brand_id'],$row['payment_method'],$row['installments']??''])) @php($current=$currentFees->get($key))<tr><td>{{ $brands[$row['card_brand_id']] }}</td><td>{{ $row['payment_method']==='debit'?'Débito':'Crédito' }}</td><td>{{ $current?\App\Support\DecimalFormatter::format($current->fee_percentage,4).'%':'Não cadastrada' }}</td><td class="font-bold">{{ \App\Support\DecimalFormatter::format($row['fee_percentage'],4) }}%</td><td>R$ {{ \App\Support\DecimalFormatter::format($row['fixed_fee'],2) }}</td></tr>@endforeach</tbody></table></div></div>
+<div class="mt-6 flex gap-3"><form method="POST" action="{{ route('payment-fees.imports.confirm',$import) }}">@csrf<button class="btn-primary">Confirmar e aplicar</button></form><form method="POST" action="{{ route('payment-fees.imports.reject',$import) }}">@csrf<button class="btn-secondary">Rejeitar</button></form></div>
+@endsection

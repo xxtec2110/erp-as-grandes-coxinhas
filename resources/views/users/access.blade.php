@@ -1,0 +1,11 @@
+@extends('layouts.app')
+@section('title', 'Acessos de '.$managedUser->name)
+@section('content')
+<div class="page-header"><div><h1 class="page-title">Acessos de {{ $managedUser->name }}</h1><p class="page-subtitle">As exceções individuais prevalecem sobre os perfis.</p></div><a class="btn-secondary" href="{{ route('users.index') }}">Voltar</a></div>
+<form method="POST" action="{{ route('users.access.update', $managedUser) }}" class="space-y-6">@csrf @method('PUT')
+<section class="form-card"><h2 class="section-title">Perfis</h2><div class="mt-4 grid gap-3 sm:grid-cols-2">@foreach($roles as $role)<label class="flex gap-3"><input type="checkbox" name="role_ids[]" value="{{ $role->id }}" @checked($managedUser->roles->contains($role))> {{ $role->label }}</label>@endforeach</div></section>
+<section class="form-card"><h2 class="section-title">Unidades autorizadas</h2><label class="mt-4 flex gap-3 font-semibold"><input type="checkbox" name="all_locations_access" value="1" @checked($managedUser->all_locations_access)> Todas as unidades</label><div class="mt-4 grid gap-3 sm:grid-cols-2">@foreach($locations as $location)<label class="flex gap-3"><input type="checkbox" name="location_ids[]" value="{{ $location->id }}" @checked($managedUser->locations->contains($location))> {{ $location->name }}</label>@endforeach</div></section>
+<section class="form-card"><h2 class="section-title">Exceções individuais</h2><div class="mt-4 space-y-4">@foreach($permissions->groupBy('group') as $group => $groupPermissions)<div><h3 class="font-bold text-stone-700">{{ $group }}</h3><div class="mt-2 grid gap-3 md:grid-cols-2">@foreach($groupPermissions as $permission) @php($pivot=$managedUser->permissions->firstWhere('id',$permission->id)?->pivot) <label><span class="form-label">{{ $permission->label }}</span><select class="form-input" name="permission_overrides[{{ $permission->id }}]"><option value="inherit" @selected(!$pivot)>Herdar do perfil</option><option value="allow" @selected($pivot?->allowed === true)>Permitir</option><option value="deny" @selected($pivot?->allowed === false)>Negar</option></select></label>@endforeach</div></div>@endforeach</div></section>
+<button class="btn-primary">Salvar acessos</button>
+</form>
+@endsection

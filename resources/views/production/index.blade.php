@@ -1,0 +1,9 @@
+@extends('layouts.app')
+@section('title', 'Produção')
+@section('content')
+    <div class="page-header"><div><h1 class="page-title">Produção</h1><p class="page-subtitle">Planejamento e conclusão da produção de produtos finais.</p></div><div class="flex flex-wrap gap-2"><a class="btn-secondary" href="{{ route('production-requirements.index') }}">Produção sugerida</a><a class="btn-primary" href="{{ route('production.create') }}">Planejar produção</a></div></div>
+    <div class="table-card"><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Data</th><th>Produto</th><th>Unidade</th><th>Planejado</th><th>Realizado</th><th>Status</th><th class="text-right">Ação</th></tr></thead><tbody>
+        @forelse ($productions as $production)<tr><td>{{ $production->operation_date->format('d/m/Y') }}</td><td class="font-semibold">{{ $production->product->name }}</td><td>{{ $production->location->name }}</td><td>{{ \App\Support\DecimalFormatter::format($production->planned_quantity, $production->product->stock_unit === 'un' ? 0 : 3) }} {{ $production->product->stock_unit }}</td><td>{{ $production->actual_quantity !== null ? \App\Support\DecimalFormatter::format($production->actual_quantity, $production->product->stock_unit === 'un' ? 0 : 3).' '.$production->product->stock_unit : '—' }}</td><td><span class="status-badge {{ $production->status === \App\Enums\ProductionStatus::Completed ? 'status-active' : 'status-inactive' }}">{{ $production->status->label() }}</span></td><td class="text-right"><a class="text-link" href="{{ route('production.show', $production) }}">Abrir</a></td></tr>
+        @empty <tr><td colspan="7" class="empty-state">Nenhuma produção registrada.</td></tr> @endforelse
+    </tbody></table></div></div><div class="mt-5">{{ $productions->links() }}</div>
+@endsection

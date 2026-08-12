@@ -1,7 +1,218 @@
 <?php
 
+use App\Http\Controllers\AcquirerController;
+use App\Http\Controllers\AgentAdministrationController;
+use App\Http\Controllers\AgentAttachmentController;
+use App\Http\Controllers\AgentSimulatorController;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\CardBrandController;
+use App\Http\Controllers\EquipmentBurnerController;
+use App\Http\Controllers\FinanceController;
+use App\Http\Controllers\GlpPriceController;
+use App\Http\Controllers\GlpProductController;
+use App\Http\Controllers\IngredientCategoryController;
+use App\Http\Controllers\IngredientController;
+use App\Http\Controllers\IngredientPriceController;
+use App\Http\Controllers\LocationController;
+use App\Http\Controllers\LossReasonController;
+use App\Http\Controllers\OperationalReportController;
+use App\Http\Controllers\PaymentFeeController;
+use App\Http\Controllers\PreparationAdditionalCostController;
+use App\Http\Controllers\PreparationController;
+use App\Http\Controllers\PreparationEnergyUsageController;
+use App\Http\Controllers\PreparationIngredientController;
+use App\Http\Controllers\ProductCategoryController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\ProductionController;
+use App\Http\Controllers\ProductionEquipmentController;
+use App\Http\Controllers\ProductionRequirementController;
+use App\Http\Controllers\ProductLossController;
+use App\Http\Controllers\ProductSaleController;
+use App\Http\Controllers\ProductStockPolicyController;
+use App\Http\Controllers\PurchaseDocumentController;
+use App\Http\Controllers\StockAdjustmentController;
+use App\Http\Controllers\StockController;
+use App\Http\Controllers\StockTransferController;
+use App\Http\Controllers\SupplierController;
+use App\Http\Controllers\UserAccessController;
+use App\Http\Controllers\WhatsAppConnectionController;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\View;
 
-Route::get('/', function () {
-    return view('welcome');
+Route::get('/', function (): View|RedirectResponse {
+    return auth()->check()
+        ? redirect()->route('dashboard')
+        : view('auth.login');
+})->name('home');
+
+Route::middleware('guest')->group(function (): void {
+    Route::get('/login', [AuthenticatedSessionController::class, 'create'])
+        ->name('login');
+    Route::post('/login', [AuthenticatedSessionController::class, 'store'])
+        ->name('login.store');
+});
+
+Route::middleware('auth')->group(function (): void {
+    Route::post('/anexos', [AgentAttachmentController::class, 'store'])->name('attachments.store');
+    Route::get('/anexos/{attachment}/download', [AgentAttachmentController::class, 'download'])->name('attachments.download');
+    Route::view('/dashboard', 'dashboard')->name('dashboard');
+    Route::get('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'index'])->middleware('permission:users.manage')->name('agent.simulator');
+    Route::post('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'send'])->middleware('permission:users.manage')->name('agent.simulator.send');
+    Route::get('/configuracoes/agente/identidades', [AgentAdministrationController::class, 'identities'])->middleware('permission:users.manage')->name('agent.identities.index');
+    Route::get('/configuracoes/agente/identidades/{identity}/editar', [AgentAdministrationController::class, 'editIdentity'])->middleware('permission:users.manage')->name('agent.identities.edit');
+    Route::put('/configuracoes/agente/identidades/{identity}', [AgentAdministrationController::class, 'updateIdentity'])->middleware('permission:users.manage')->name('agent.identities.update');
+    Route::get('/configuracoes/agente/observabilidade', [AgentAdministrationController::class, 'observability'])->middleware('permission:users.manage')->name('agent.observability');
+    Route::put('/configuracoes/agente/custos', [AgentAdministrationController::class, 'updateCosts'])->middleware('permission:users.manage')->name('agent.costs.update');
+    Route::get('/configuracoes/agente/interacoes/{conversation}', [AgentAdministrationController::class, 'interaction'])->middleware('permission:users.manage')->name('agent.interactions.show');
+    Route::get('/configuracoes/agente/whatsapp', [WhatsAppConnectionController::class, 'index'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.index');
+    Route::post('/configuracoes/agente/whatsapp/verificar', [WhatsAppConnectionController::class, 'check'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.check');
+
+    Route::resource('fornecedores', SupplierController::class)
+        ->parameters(['fornecedores' => 'supplier'])
+        ->names('suppliers')
+        ->except(['show', 'destroy'])
+        ->middlewareFor(['index'], 'permission:suppliers.view')
+        ->middlewareFor(['create', 'store', 'edit', 'update'], 'permission:suppliers.manage');
+    Route::resource('unidades', LocationController::class)
+        ->parameters(['unidades' => 'location'])
+        ->names('locations')
+        ->except(['show', 'destroy'])
+        ->middlewareFor(['index'], 'permission:locations.view')
+        ->middlewareFor(['create', 'store'], 'permission:locations.create')
+        ->middlewareFor(['edit', 'update'], 'permission:locations.update,location');
+    Route::get('/produtos', [ProductController::class, 'index'])->middleware('permission:products.view')->name('products.index');
+    Route::get('/produtos/criar', [ProductController::class, 'create'])->middleware('permission:products.create')->name('products.create');
+    Route::post('/produtos', [ProductController::class, 'store'])->middleware('permission:products.create')->name('products.store');
+    Route::get('/produtos/{product}/editar', [ProductController::class, 'edit'])->middleware('permission:products.update')->name('products.edit');
+    Route::put('/produtos/{product}', [ProductController::class, 'update'])->middleware('permission:products.update')->name('products.update');
+    Route::get('/estoque', [StockController::class, 'index'])->middleware('permission:stock.view')->name('stock.index');
+    Route::get('/estoque/{product}/{location}', [StockController::class, 'show'])->middleware('permission:stock.view,location')->name('stock.show');
+    Route::get('/estoque/{product}/{location}/ajustar', [StockAdjustmentController::class, 'create'])
+        ->middleware('permission:stock.adjust,location')->name('stock.adjustments.create');
+    Route::post('/estoque/{product}/{location}/ajustar', [StockAdjustmentController::class, 'store'])
+        ->middleware('permission:stock.adjust,location')->name('stock.adjustments.store');
+    Route::get('/producao', [ProductionController::class, 'index'])->middleware('permission:production.view')->name('production.index');
+    Route::get('/producao/criar', [ProductionController::class, 'create'])->middleware('permission:production.create')->name('production.create');
+    Route::post('/producao', [ProductionController::class, 'store'])->middleware('permission:production.create')->name('production.store');
+    Route::get('/producao/{production}', [ProductionController::class, 'show'])->middleware('permission:production.view')->name('production.show');
+    Route::post('/producao/{production}/concluir', [ProductionController::class, 'complete'])->middleware('permission:production.create')->name('production.complete');
+    Route::post('/producao/{production}/cancelar', [ProductionController::class, 'cancel'])->middleware('permission:production.create')->name('production.cancel');
+    Route::get('/transferencias', [StockTransferController::class, 'index'])->middleware('permission:transfers.view')->name('transfers.index');
+    Route::get('/transferencias/criar', [StockTransferController::class, 'create'])->middleware('permission:transfers.create')->name('transfers.create');
+    Route::post('/transferencias', [StockTransferController::class, 'store'])->middleware('permission:transfers.create')->name('transfers.store');
+    Route::get('/transferencias/{transfer}', [StockTransferController::class, 'show'])->middleware('permission:transfers.view')->name('transfers.show');
+    Route::post('/transferencias/{transfer}/expedir', [StockTransferController::class, 'dispatch'])->middleware('permission:transfers.create')->name('transfers.dispatch');
+    Route::post('/transferencias/{transfer}/receber', [StockTransferController::class, 'receive'])->middleware('permission:transfers.receive')->name('transfers.receive');
+    Route::post('/transferencias/{transfer}/cancelar', [StockTransferController::class, 'cancel'])->middleware('permission:transfers.create')->name('transfers.cancel');
+    Route::resource('politicas-estoque', ProductStockPolicyController::class)
+        ->parameters(['politicas-estoque' => 'stockPolicy'])
+        ->names('stock-policies')
+        ->except(['show', 'destroy'])
+        ->middlewareFor(['index'], 'permission:stock_policies.view')
+        ->middlewareFor(['create', 'store'], 'permission:stock_policies.manage')
+        ->middlewareFor(['edit', 'update'], 'permission:stock_policies.manage,stockPolicy');
+    Route::get('/producao-sugerida', [ProductionRequirementController::class, 'index'])->middleware('permission:production_requirements.view')
+        ->name('production-requirements.index');
+    Route::get('/perdas', [ProductLossController::class, 'index'])->middleware('permission:losses.view')->name('losses.index');
+    Route::get('/perdas/criar', [ProductLossController::class, 'create'])->middleware('permission:losses.create')->name('losses.create');
+    Route::post('/perdas', [ProductLossController::class, 'store'])->middleware('permission:losses.create')->name('losses.store');
+    Route::get('/configuracoes/motivos-perda', [LossReasonController::class, 'index'])->middleware('permission:catalogs.manage')->name('loss-reasons.index');
+    Route::post('/configuracoes/motivos-perda', [LossReasonController::class, 'store'])->middleware('permission:catalogs.manage')->name('loss-reasons.store');
+    Route::put('/configuracoes/motivos-perda/{lossReason}', [LossReasonController::class, 'update'])->middleware('permission:catalogs.manage')->name('loss-reasons.update');
+    Route::get('/relatorios/operacional', [OperationalReportController::class, 'index'])->middleware('permission:reports.view')->name('reports.operational');
+    Route::get('/vendas', [ProductSaleController::class, 'index'])->middleware('permission:sales.view')->name('sales.index');
+    Route::get('/vendas/criar', [ProductSaleController::class, 'create'])->middleware('permission:sales.create')->name('sales.create');
+    Route::post('/vendas', [ProductSaleController::class, 'store'])->middleware('permission:sales.create')->name('sales.store');
+    Route::get('/financeiro', [FinanceController::class, 'index'])->middleware('permission:finance.view')->name('finance.index');
+    Route::get('/financeiro/contas/criar', [FinanceController::class, 'create'])->middleware('permission:finance.payables.create')->name('finance.create');
+    Route::post('/financeiro/contas', [FinanceController::class, 'store'])->middleware('permission:finance.payables.create')->name('finance.store');
+    Route::get('/financeiro/contas/{payable}/pagar', [FinanceController::class, 'payment'])->middleware('permission:finance.payments.create')->name('finance.payments.create');
+    Route::post('/financeiro/contas/{payable}/pagamentos', [FinanceController::class, 'pay'])->middleware('permission:finance.payments.create')->name('finance.payments.store');
+    Route::get('/financeiro/configuracoes', [FinanceController::class, 'settings'])->middleware('permission:finance.accounts.manage')->name('finance.settings');
+    Route::post('/financeiro/configuracoes/contas', [FinanceController::class, 'account'])->middleware('permission:finance.accounts.manage')->name('finance.accounts.store');
+    Route::post('/financeiro/configuracoes/categorias', [FinanceController::class, 'category'])->middleware('permission:finance.accounts.manage')->name('finance.categories.store');
+    Route::post('/financeiro/configuracoes/centros', [FinanceController::class, 'center'])->middleware('permission:finance.accounts.manage')->name('finance.centers.store');
+    Route::get('/compras/documentos', [PurchaseDocumentController::class, 'index'])->middleware('permission:purchases.view')->name('purchases.index');
+    Route::get('/compras/documentos/criar', [PurchaseDocumentController::class, 'create'])->middleware('permission:purchases.create')->name('purchases.create');
+    Route::post('/compras/documentos', [PurchaseDocumentController::class, 'store'])->middleware('permission:purchases.create')->name('purchases.store');
+    Route::get('/configuracoes/taxas-venda', [PaymentFeeController::class, 'index'])->middleware('permission:payment_fees.view')->name('payment-fees.index');
+    Route::get('/configuracoes/taxas-venda/lote', [PaymentFeeController::class, 'batch'])->middleware('permission:payment_fees.manage')->name('payment-fees.batch');
+    Route::post('/configuracoes/taxas-venda/previa', [PaymentFeeController::class, 'preview'])->middleware('permission:payment_fees.import')->name('payment-fees.preview');
+    Route::get('/configuracoes/taxas-venda/importacoes/{import}', [PaymentFeeController::class, 'showImport'])->middleware('permission:payment_fees.view')->name('payment-fees.imports.show');
+    Route::post('/configuracoes/taxas-venda/importacoes/{import}/confirmar', [PaymentFeeController::class, 'confirm'])->middleware('permission:payment_fees.approve_import')->name('payment-fees.imports.confirm');
+    Route::post('/configuracoes/taxas-venda/importacoes/{import}/rejeitar', [PaymentFeeController::class, 'reject'])->middleware('permission:payment_fees.approve_import')->name('payment-fees.imports.reject');
+    Route::post('/configuracoes/adquirentes', [AcquirerController::class, 'store'])->middleware('permission:acquirers.manage')->name('acquirers.store');
+    Route::put('/configuracoes/adquirentes/{acquirer}', [AcquirerController::class, 'update'])->middleware('permission:acquirers.manage')->name('acquirers.update');
+    Route::post('/configuracoes/bandeiras', [CardBrandController::class, 'store'])->middleware('permission:card_brands.manage')->name('card-brands.store');
+    Route::put('/configuracoes/bandeiras/{cardBrand}', [CardBrandController::class, 'update'])->middleware('permission:card_brands.manage')->name('card-brands.update');
+    Route::resource('configuracoes/categorias-produtos', ProductCategoryController::class)
+        ->parameters(['categorias-produtos' => 'productCategory'])
+        ->names('product-categories')
+        ->only(['index', 'store', 'update'])
+        ->middleware('permission:product_categories.manage');
+    Route::get('/configuracoes/usuarios', [UserAccessController::class, 'index'])
+        ->middleware('permission:users.manage')->name('users.index');
+    Route::get('/configuracoes/usuarios/{user}/acessos', [UserAccessController::class, 'edit'])
+        ->middleware('permission:users.manage')->name('users.access.edit');
+    Route::put('/configuracoes/usuarios/{user}/acessos', [UserAccessController::class, 'update'])
+        ->middleware('permission:users.manage')->name('users.access.update');
+    Route::resource('insumos', IngredientController::class)
+        ->parameters(['insumos' => 'ingredient'])
+        ->names('ingredients')
+        ->except('destroy')
+        ->middlewareFor(['index', 'show'], 'permission:ingredients.view')
+        ->middlewareFor(['create', 'store'], 'permission:ingredients.create')
+        ->middlewareFor(['edit', 'update'], 'permission:ingredients.update');
+    Route::post('/insumos/{ingredient}/precos', [IngredientPriceController::class, 'store'])
+        ->middleware('permission:ingredient_prices.update')->name('ingredients.prices.store');
+    Route::resource('configuracoes/categorias-insumos', IngredientCategoryController::class)
+        ->parameters(['categorias-insumos' => 'ingredientCategory'])
+        ->names('ingredient-categories')
+        ->except(['show', 'destroy'])->middleware('permission:catalogs.manage');
+
+    Route::resource('equipamentos', ProductionEquipmentController::class)
+        ->parameters(['equipamentos' => 'equipment'])
+        ->names('equipment')
+        ->except('destroy')->middleware('permission:catalogs.manage');
+    Route::post('/equipamentos/{equipment}/queimadores', [EquipmentBurnerController::class, 'store'])
+        ->middleware('permission:catalogs.manage')->name('equipment.burners.store');
+    Route::get('/equipamentos/{equipment}/queimadores/{burner}/editar', [EquipmentBurnerController::class, 'edit'])
+        ->middleware('permission:catalogs.manage')->name('equipment.burners.edit');
+    Route::put('/equipamentos/{equipment}/queimadores/{burner}', [EquipmentBurnerController::class, 'update'])
+        ->middleware('permission:catalogs.manage')->name('equipment.burners.update');
+
+    Route::resource('glp', GlpProductController::class)
+        ->parameters(['glp' => 'glpProduct'])
+        ->names('glp-products')
+        ->except('destroy')->middleware('permission:catalogs.manage');
+    Route::post('/glp/{glpProduct}/precos', [GlpPriceController::class, 'store'])
+        ->middleware('permission:catalogs.manage')->name('glp-products.prices.store');
+
+    Route::resource('preparos', PreparationController::class)
+        ->parameters(['preparos' => 'preparation'])
+        ->names('preparations')
+        ->except('destroy')
+        ->middlewareFor(['index', 'show'], 'permission:preparations.view')
+        ->middlewareFor(['create', 'store'], 'permission:preparations.create')
+        ->middlewareFor(['edit', 'update'], 'permission:preparations.update');
+    Route::post('/preparos/{preparation}/ingredientes', [PreparationIngredientController::class, 'store'])
+        ->middleware('permission:preparations.update')->name('preparations.ingredients.store');
+    Route::delete('/preparos/{preparation}/ingredientes/{preparationIngredient}', [PreparationIngredientController::class, 'destroy'])
+        ->middleware('permission:preparations.update')->name('preparations.ingredients.destroy');
+    Route::post('/preparos/{preparation}/energia', [PreparationEnergyUsageController::class, 'store'])
+        ->middleware('permission:preparations.update')->name('preparations.energy-usages.store');
+    Route::get('/preparos/{preparation}/energia/{energyUsage}/editar', [PreparationEnergyUsageController::class, 'edit'])
+        ->middleware('permission:preparations.update')->name('preparations.energy-usages.edit');
+    Route::put('/preparos/{preparation}/energia/{energyUsage}', [PreparationEnergyUsageController::class, 'update'])
+        ->middleware('permission:preparations.update')->name('preparations.energy-usages.update');
+    Route::delete('/preparos/{preparation}/energia/{energyUsage}', [PreparationEnergyUsageController::class, 'destroy'])
+        ->middleware('permission:preparations.update')->name('preparations.energy-usages.destroy');
+    Route::post('/preparos/{preparation}/custos-adicionais', [PreparationAdditionalCostController::class, 'store'])
+        ->middleware('permission:preparations.update')->name('preparations.additional-costs.store');
+    Route::delete('/preparos/{preparation}/custos-adicionais/{additionalCost}', [PreparationAdditionalCostController::class, 'destroy'])
+        ->middleware('permission:preparations.update')->name('preparations.additional-costs.destroy');
+
+    Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
+        ->name('logout');
 });

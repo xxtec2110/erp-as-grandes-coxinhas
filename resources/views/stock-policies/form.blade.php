@@ -1,0 +1,20 @@
+@extends('layouts.app')
+@section('title', $policy ? 'Editar política' : 'Nova política')
+@section('content')
+    <div class="page-header"><div><h1 class="page-title">{{ $policy ? 'Editar política de estoque' : 'Nova política de estoque' }}</h1><p class="page-subtitle">Configuração independente para cada produto e unidade.</p></div><a class="btn-secondary" href="{{ route('stock-policies.index') }}">Voltar</a></div>
+    <form method="POST" action="{{ $policy ? route('stock-policies.update', $policy) : route('stock-policies.store') }}" class="form-card">@csrf @if($policy) @method('PUT') @endif
+        @if ($errors->any())<div class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><ul class="list-disc pl-5">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
+        <input type="hidden" name="idempotency_key" value="{{ old('idempotency_key', $idempotencyKey) }}">
+        <div class="grid gap-5 sm:grid-cols-2">
+            <div><label class="form-label" for="product_id">Produto</label><select id="product_id" name="product_id" class="form-input" required @disabled($policy)>@foreach ($products as $product)<option value="{{ $product->id }}" @selected((string) old('product_id', $policy?->product_id) === (string) $product->id)>{{ $product->name }} ({{ $product->stock_unit }})</option>@endforeach</select>@if($policy)<input type="hidden" name="product_id" value="{{ $policy->product_id }}">@endif</div>
+            <div><label class="form-label" for="location_id">Unidade</label><select id="location_id" name="location_id" class="form-input" required @disabled($policy)>@foreach ($locations as $location)<option value="{{ $location->id }}" @selected((string) old('location_id', $policy?->location_id) === (string) $location->id)>{{ $location->name }}</option>@endforeach</select>@if($policy)<input type="hidden" name="location_id" value="{{ $policy->location_id }}">@endif</div>
+            <div><label class="form-label" for="minimum_quantity">Estoque mínimo</label><input id="minimum_quantity" name="minimum_quantity" type="number" min="0" step="0.000001" class="form-input" value="{{ old('minimum_quantity', $policy?->minimum_quantity) }}"></div>
+            <div><label class="form-label" for="target_quantity">Estoque-alvo</label><input id="target_quantity" name="target_quantity" type="number" min="0" step="0.000001" class="form-input" required value="{{ old('target_quantity', $policy?->target_quantity) }}"></div>
+            <div><label class="form-label" for="production_priority">Prioridade (0 a 100)</label><input id="production_priority" name="production_priority" type="number" min="0" max="100" class="form-input" required value="{{ old('production_priority', $policy?->production_priority ?? 0) }}"></div>
+            <label class="flex items-end gap-3 pb-3 text-sm font-medium"><input type="checkbox" name="active" value="1" class="h-5 w-5 rounded" @checked(old('active', $policy?->active ?? true))> Política ativa</label>
+        </div><div class="mt-6"><button class="btn-primary" type="submit">Salvar política</button></div>
+    </form>
+    @if ($policy)
+        <section class="mt-6"><h2 class="mb-4 text-lg font-bold">Histórico de alterações</h2><div class="table-card"><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Data</th><th>Mínimo</th><th>Alvo</th><th>Prioridade</th><th>Responsável</th><th>Canal</th></tr></thead><tbody>@forelse($policy->histories as $history)<tr><td>{{ $history->created_at->format('d/m/Y H:i') }}</td><td>{{ $history->previous_minimum_quantity ?? '—' }} → {{ $history->new_minimum_quantity ?? '—' }}</td><td>{{ $history->previous_target_quantity ?? '—' }} → {{ $history->new_target_quantity }}</td><td>{{ $history->previous_production_priority ?? '—' }} → {{ $history->new_production_priority }}</td><td>{{ $history->changer?->name ?? 'Sistema' }}</td><td>{{ $history->channel }}</td></tr>@empty<tr><td colspan="6" class="empty-state">Sem alterações.</td></tr>@endforelse</tbody></table></div></div></section>
+    @endif
+@endsection

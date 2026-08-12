@@ -1,0 +1,6 @@
+@extends('layouts.app')
+@section('title', 'Perdas')
+@section('content')
+    <div class="page-header"><div><h1 class="page-title">Perdas de produtos</h1><p class="page-subtitle">Baixas rastreáveis no estoque oficial.</p></div><div class="flex flex-wrap gap-2"><a class="btn-secondary" href="{{ route('loss-reasons.index') }}">Motivos</a><a class="btn-primary" href="{{ route('losses.create') }}">Registrar perda</a></div></div>
+    <div class="table-card"><div class="overflow-x-auto"><table class="data-table"><thead><tr><th>Data</th><th>Unidade</th><th>Produto</th><th>Quantidade</th><th>Motivo</th><th>Responsável</th></tr></thead><tbody>@forelse($losses as $loss)<tr><td>{{ $loss->operation_date->format('d/m/Y') }}</td><td>{{ $loss->location->name }}</td><td class="font-semibold">{{ $loss->product->name }}</td><td>{{ \App\Support\DecimalFormatter::format($loss->quantity, $loss->product->stock_unit === 'un' ? 0 : 3) }} {{ $loss->product->stock_unit }}</td><td>{{ $loss->reason->name }}</td><td>{{ $loss->creator?->name ?? 'Sistema' }}</td></tr>@empty<tr><td colspan="6" class="empty-state">Nenhuma perda registrada.</td></tr>@endforelse</tbody></table></div></div><div class="mt-5">{{ $losses->links() }}</div>
+@endsection
