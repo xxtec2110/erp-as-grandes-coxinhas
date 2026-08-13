@@ -82,6 +82,15 @@ class AgentAdministrationTest extends TestCase
         $this->actingAs($admin)->get(route('agent.observability'))->assertOk();
     }
 
+    public function test_simulator_defaults_to_fake_and_blocks_live_provider_without_all_guards(): void
+    {
+        $admin = User::factory()->create(['is_super_admin' => true]);
+
+        $this->actingAs($admin)->get(route('agent.simulator'))->assertOk()->assertSee('🧪 FAKE')->assertSee('🔴 LIVE TEST');
+        $this->actingAs($admin)->post(route('agent.simulator.send'), ['provider' => 'fake', 'text' => 'OI'])->assertOk()->assertSee('Agente');
+        $this->actingAs($admin)->from(route('agent.simulator'))->post(route('agent.simulator.send'), ['provider' => 'live', 'text' => 'teste'])->assertRedirect(route('agent.simulator'))->assertSessionHasErrors('provider');
+    }
+
     public function test_observability_lists_events_and_interaction_without_exposing_a_parallel_audit(): void
     {
         $admin = User::factory()->create(['is_super_admin' => true]);

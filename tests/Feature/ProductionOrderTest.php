@@ -9,6 +9,7 @@ use App\Models\Location;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\IngredientShortageService;
 use App\Services\IngredientStockService;
 use App\Services\ProductionOrderService;
 use App\Services\ProductRecipeService;
@@ -73,6 +74,19 @@ class ProductionOrderTest extends TestCase
         $this->assertSame('planned', $order->fresh()->status);
         $this->assertDatabaseCount('stock_movements', 0);
         $this->assertDatabaseCount('ingredient_stock_movements', 0);
+    }
+
+    public function test_planned_orders_expose_ingredient_shortage_against_official_balance(): void
+    {
+        app(IngredientStockService::class)->record(['ingredient_id' => $this->ingredient->id, 'location_id' => $this->location->id, 'type' => 'positive_adjustment', 'quantity_delta' => '600', 'operation_date' => now()->toDateString(), 'idempotency_key' => 'shortage-opening']);
+        app(ProductionOrderService::class)->plan(['location_id' => $this->location->id, 'production_date' => now()->toDateString(), 'idempotency_key' => 'shortage-order', 'items' => [['product_id' => $this->product->id, 'planned_quantity' => '10']]], $this->user);
+
+        $shortage = app(IngredientShortageService::class)->forLocation($this->location)[0];
+
+        $this->assertSame($this->ingredient->id, $shortage['ingredient']->id);
+        $this->assertSame('600.000000', $shortage['available']);
+        $this->assertSame('1000.000000', $shortage['required']);
+        $this->assertSame('400.000000', $shortage['missing']);
     }
 
     public function test_reversal_is_blocked_when_finished_product_balance_is_unavailable(): void

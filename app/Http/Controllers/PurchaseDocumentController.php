@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PartialPurchaseReceiptRequest;
 use App\Http\Requests\PurchaseDocumentRequest;
 use App\Http\Requests\PurchaseReceiptRequest;
 use App\Models\CostCenter;
@@ -33,6 +34,13 @@ class PurchaseDocumentController
         return view('purchases.create', ['suppliers' => Supplier::query()->orderBy('name')->get(), 'locations' => $a->accessibleLocations($r->user()), 'categories' => FinanceCategory::query()->where('active', true)->get(), 'centers' => CostCenter::query()->where('active', true)->get(), 'ingredients' => Ingredient::query()->where('active', true)->orderBy('name')->get(), 'key' => (string) Str::uuid()]);
     }
 
+    public function show(PurchaseDocument $document, Request $request, AuthorizationService $authorization): View
+    {
+        $authorization->authorize($request->user(), 'purchases.view', $document->location_id);
+
+        return view('purchases.show', ['document' => $document->load(['supplier', 'location', 'items.ingredient']), 'key' => (string) Str::uuid()]);
+    }
+
     public function store(PurchaseDocumentRequest $r, CreatePurchaseDocumentService $s): RedirectResponse
     {
         $s->create($r->validated(), $r->user());
@@ -45,6 +53,17 @@ class PurchaseDocumentController
         $service->receive($document, $request->validated('received_date'), $request->user());
 
         return back()->with('success', 'Mercadoria recebida e estoque de insumos atualizado.');
+    }
+
+    public function receivePartial(PartialPurchaseReceiptRequest $request, PurchaseDocument $document, PurchaseReceiptService $service): RedirectResponse
+    {
+        try {
+            $service->receivePartial($document, $request->validated('received_date'), $request->validated('quantities'), $request->validated('idempotency_key'), $request->user());
+        } catch (\DomainException $exception) {
+            throw ValidationException::withMessages(['receipt' => $exception->getMessage()]);
+        }
+
+        return back()->with('success', 'Recebimento físico registrado.');
     }
 
     public function payable(PurchaseDocument $document, Request $request, PurchasePayableService $service): RedirectResponse

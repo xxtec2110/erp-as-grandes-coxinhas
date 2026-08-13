@@ -51,6 +51,43 @@ class OperationalConsolidationTest extends TestCase
         $this->assertDatabaseHas('ingredient_stock_movements', ['ingredient_id' => $ingredient->id, 'quantity_delta' => '2500.000000']);
     }
 
+    public function test_purchase_can_be_received_in_idempotent_partial_events(): void
+    {
+        $this->seed(AuthorizationSeeder::class);
+        $user = User::factory()->create();
+        $location = Location::query()->create(['name' => 'Fábrica', 'type' => 'production', 'active' => true]);
+        $ingredient = Ingredient::query()->create(['name' => 'Farinha', 'base_unit' => 'g', 'active' => true]);
+        $document = PurchaseDocument::query()->create(['document_type' => 'invoice', 'issue_date' => now(), 'total_amount' => '80', 'location_id' => $location->id, 'idempotency_key' => 'partial-doc']);
+        $item = $document->items()->create(['ingredient_id' => $ingredient->id, 'description' => 'Farinha', 'quantity' => '10', 'unit' => 'kg', 'unit_price' => '8', 'total_price' => '80']);
+        $service = app(PurchaseReceiptService::class);
+
+        $service->receivePartial($document, now()->toDateString(), [$item->id => '4'], 'partial-event-1', $user);
+        $service->receivePartial($document->fresh(), now()->toDateString(), [$item->id => '4'], 'partial-event-1', $user);
+        $this->assertSame('partially_received', $document->fresh()->receipt_status);
+        $this->assertSame('4.000000', $item->fresh()->received_quantity);
+        $this->assertDatabaseCount('ingredient_stock_movements', 1);
+
+        $service->receivePartial($document->fresh(), now()->toDateString(), [$item->id => '6'], 'partial-event-2', $user);
+        $this->assertSame('received', $document->fresh()->receipt_status);
+        $this->assertSame('10.000000', $item->fresh()->received_quantity);
+        $this->assertDatabaseCount('ingredient_stock_movements', 2);
+        $this->assertDatabaseHas('ingredient_stock_movements', ['quantity_delta' => '4000.000000']);
+        $this->assertDatabaseHas('ingredient_stock_movements', ['quantity_delta' => '6000.000000']);
+    }
+
+    public function test_purchase_receipt_rejects_quantity_above_pending_balance(): void
+    {
+        $this->seed(AuthorizationSeeder::class);
+        $user = User::factory()->create();
+        $location = Location::query()->create(['name' => 'Fábrica', 'type' => 'production', 'active' => true]);
+        $ingredient = Ingredient::query()->create(['name' => 'Farinha', 'base_unit' => 'g', 'active' => true]);
+        $document = PurchaseDocument::query()->create(['document_type' => 'invoice', 'issue_date' => now(), 'total_amount' => '80', 'location_id' => $location->id, 'idempotency_key' => 'over-receipt-doc']);
+        $item = $document->items()->create(['ingredient_id' => $ingredient->id, 'description' => 'Farinha', 'quantity' => '10', 'unit' => 'kg', 'unit_price' => '8', 'total_price' => '80']);
+
+        $this->expectException(\DomainException::class);
+        app(PurchaseReceiptService::class)->receivePartial($document, now()->toDateString(), [$item->id => '11'], 'over-receipt-event', $user);
+    }
+
     public function test_audio_grant_updates_permission_identity_and_audit(): void
     {
         $this->seed(AuthorizationSeeder::class);

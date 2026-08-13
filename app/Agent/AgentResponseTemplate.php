@@ -20,6 +20,24 @@ class AgentResponseTemplate
         return implode("\n", $lines);
     }
 
+    public function ingredientShortages(iterable $items, string $location): string
+    {
+        $lines = ['⚠️ INSUMOS COM RISCO DE FALTA', '', '🏭 '.$location, ''];
+        foreach ($items as $item) {
+            $unit = $item['ingredient']->base_unit;
+            $lines[] = $item['ingredient']->name;
+            $lines[] = 'Disponível: '.DecimalFormatter::format($item['available'], 3).' '.$unit;
+            $lines[] = 'Necessário: '.DecimalFormatter::format($item['required'], 3).' '.$unit;
+            $lines[] = 'Falta: '.DecimalFormatter::format($item['missing'], 3).' '.$unit;
+            $lines[] = '';
+        }
+        if (count($lines) === 4) {
+            $lines[] = 'Nenhum risco de falta para as ordens planejadas.';
+        }
+
+        return implode("\n", $lines);
+    }
+
     public function stock(iterable $positions, string $location): string
     {
         $lines = ['📦 ESTOQUE', '', '🏭 '.$location, ''];
@@ -164,13 +182,18 @@ class AgentResponseTemplate
     public function operational(array $summary, string $location): string
     {
         $lines = ['📊 RELATÓRIO OPERACIONAL', '', $location, ''];
+        $hasMovement = false;
         foreach (['production' => 'Produção', 'entries' => 'Entradas', 'outbound' => 'Saídas', 'transfers' => 'Transferências', 'receipts' => 'Recebimentos', 'losses' => 'Perdas'] as $key => $label) {
             foreach ($summary[$key] ?? [] as $unit => $value) {
+                $hasMovement = true;
                 $lines[] = $label.': '.DecimalFormatter::format($value, $unit === 'un' ? 0 : 3).' '.$unit;
             }
         }
+        $lines[] = '';
+        $lines[] = '💰 Faturamento: R$ '.DecimalFormatter::format($summary['revenue']['brl'] ?? '0', 2);
+        $lines[] = '💳 Taxas: R$ '.DecimalFormatter::format($summary['fees']['brl'] ?? '0', 2);
 
-        if (count($lines) === 4) {
+        if (! $hasMovement) {
             $lines[] = 'Nenhum movimento no período.';
         }
 

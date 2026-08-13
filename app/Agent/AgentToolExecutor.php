@@ -16,6 +16,7 @@ use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
+use App\Services\IngredientShortageService;
 use App\Services\IngredientStockPositionService;
 use App\Services\OperationalSummaryService;
 use App\Services\ProductionOrderService;
@@ -34,7 +35,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false): mixed
     {
@@ -64,6 +65,7 @@ class AgentToolExecutor
             'agent.access.default_location.set' => $this->accessManagement->defaultLocation($input, $user),
             'stock.positions.list' => $this->stockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
             'ingredient_stock.positions.list' => $this->ingredientStockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
+            'ingredient_stock.shortages.list' => $this->ingredientShortages->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.today' => $this->productionQuery->forDate(Location::query()->findOrFail($input['location_id']), $input['date'] ?? now()->toDateString()),
             'production.suggestions.list' => $this->productionRequirements->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.plan' => $this->production->plan($input, $user->id),

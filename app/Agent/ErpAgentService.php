@@ -6,6 +6,8 @@ use App\Models\AgentAttachment;
 use App\Models\AgentConversation;
 use App\Models\Location;
 use App\Models\PendingAgentAction;
+use App\Models\Product;
+use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
@@ -173,6 +175,12 @@ class ErpAgentService
             $missing = array_values(array_unique([...$this->missing($name, $input), ...$aiMissing]));
             $action = $this->pending->prepare($user, $name, $input, $missing, $sourceKey.':action', $conversation->id);
             if ($missing !== []) {
+                if ($name === 'transfers.receive' && in_array('transfer_id', $missing, true)) {
+                    return $this->transferQuestion($action, $user);
+                }
+                if (in_array('product_id', $missing, true)) {
+                    return $this->productQuestion($action);
+                }
                 if (in_array('supplier_id', $missing, true) && isset($input['_supplier_match']['candidates'])) {
                     $names = collect($input['_supplier_match']['candidates'])->pluck('name')->implode(', ');
 
@@ -217,7 +225,7 @@ class ErpAgentService
 
             return $this->confirmation($action);
         }
-        if (preg_match('/(?:QUANTIDADE(?: CORRETA)?|CORRIGIR QUANTIDADE(?: PARA)?)\D*([0-9]+(?:[.,][0-9]+)*)/ui', $text, $matches) === 1) {
+        if (preg_match('/(?:QUANTIDADE(?: CORRETA)?|CORRIGIR QUANTIDADE(?: PARA)?|NA VERDADE FORAM)\D*([0-9]+(?:[.,][0-9]+)*)/ui', $text, $matches) === 1) {
             $field = collect(['quantity', 'actual_quantity', 'planned_quantity', 'quantity_received'])->first(fn ($candidate) => array_key_exists($candidate, $action->payload));
             if ($field === null) {
                 return ErpAgentResponse::error('Esta prévia não possui quantidade simples corrigível.', 'correction_not_supported');
@@ -225,6 +233,43 @@ class ErpAgentService
             $action = $this->pending->merge($action, $user, [$field => str_replace(',', '.', $matches[1])], $this->missing($action->tool_name, [...$action->payload, $field => str_replace(',', '.', $matches[1])]));
 
             return $this->confirmation($action);
+        }
+        if (in_array('product_id', $action->missing_fields ?? [], true)) {
+            $payload = $action->payload;
+            $index = collect($payload['items'] ?? [])->search(fn ($item) => ! isset($item['product_id']));
+            if ($index === false) {
+                return ErpAgentResponse::error('Nenhum produto pendente foi encontrado.', 'pending_product_not_found');
+            }
+            $candidates = collect(data_get($payload, "items.{$index}._product_match.candidates", []));
+            $choice = ctype_digit(trim($text)) ? (int) trim($text) : null;
+            $selected = $choice !== null && $choice >= 1 && $choice <= $candidates->count()
+                ? $candidates->values()->get($choice - 1)
+                : $candidates->first(fn ($candidate) => mb_strtolower($candidate['name']) === mb_strtolower(trim($text)));
+            if ($selected === null) {
+                return $this->productQuestion($action);
+            }
+            $payload['items'][$index]['product_id'] = $selected['id'];
+            unset($payload['items'][$index]['_product_match']);
+            $hasUnresolved = collect($payload['items'])->contains(fn ($item) => ! isset($item['product_id']));
+            $missing = array_values(array_filter($action->missing_fields, fn ($field) => $field !== 'product_id' || $hasUnresolved));
+            $action->update(['payload' => $payload, 'missing_fields' => $missing]);
+
+            return $hasUnresolved ? $this->productQuestion($action->refresh()) : $this->confirmation($action->refresh());
+        }
+        if (in_array('transfer_id', $action->missing_fields ?? [], true)) {
+            $candidates = collect($action->payload['_transfer_candidates'] ?? []);
+            $choice = ctype_digit(trim($text)) ? (int) trim($text) : 0;
+            $selected = $choice >= 1 && $choice <= $candidates->count() ? $candidates->values()->get($choice - 1) : null;
+            if ($selected === null) {
+                return $this->transferQuestion($action, $user);
+            }
+            $payload = $action->payload;
+            unset($payload['_transfer_candidates']);
+            $payload['transfer_id'] = $selected['id'];
+            $missing = $this->missing($action->tool_name, $payload);
+            $action->update(['payload' => $payload, 'missing_fields' => $missing]);
+
+            return $missing === [] ? $this->confirmation($action->refresh()) : new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
         }
         if (preg_match('/(?:DATA|VENCIMENTO)(?: CORRETO| CORRETA)?\D*(\d{4}-\d{2}-\d{2})/ui', $text, $matches) === 1) {
             $field = str_contains(mb_strtoupper($text), 'VENCIMENTO') ? 'due_date' : collect(['operation_date', 'production_date', 'received_date', 'dispatch_date', 'paid_at'])->first(fn ($candidate) => array_key_exists($candidate, $action->payload));
@@ -280,10 +325,64 @@ class ErpAgentService
         $message = match ($action->tool_name) {
             'finance.payables.create' => $this->templates->payablePreview($action->payload),
             'agent.operations.undo' => "⚠️ CANCELAR OPERAÇÃO\n\n{$action->payload['operation_type']} #{$action->payload['operation_id']}\n\nDeseja realmente cancelar?",
+            'production.orders.plan', 'production.orders.complete_batch' => $this->productionOrderPreview($action),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
 
         return new ErpAgentResponse(true, $message, 'confirmation', $action->payload, [['id' => 'yes', 'label' => 'SIM'], ['id' => 'no', 'label' => 'NÃO']], ['id' => $action->id]);
+    }
+
+    private function productQuestion(PendingAgentAction $action): ErpAgentResponse
+    {
+        $item = collect($action->payload['items'] ?? [])->first(fn ($item) => ! isset($item['product_id']));
+        $candidates = collect(data_get($item, '_product_match.candidates', []));
+        if ($candidates->isEmpty()) {
+            return new ErpAgentResponse(true, 'Não encontrei esse produto cadastrado. Informe o nome exato pela interface administrativa.', pendingAction: ['id' => $action->id]);
+        }
+        $lines = ['Encontrei mais de uma possibilidade para "'.($item['product_name'] ?? 'produto').'":', ''];
+        foreach ($candidates->values() as $index => $candidate) {
+            $lines[] = ($index + 1).'. '.$candidate['name'];
+        }
+        $lines[] = '';
+        $lines[] = 'Qual produto é o correto?';
+
+        return new ErpAgentResponse(true, implode("\n", $lines), 'menu', options: $candidates->map(fn ($candidate) => ['id' => $candidate['id'], 'label' => $candidate['name']])->all(), pendingAction: ['id' => $action->id]);
+    }
+
+    private function productionOrderPreview(PendingAgentAction $action): string
+    {
+        $location = isset($action->payload['location_id']) ? Location::query()->find($action->payload['location_id'])?->name : 'Não informada';
+        $lines = [$action->tool_name === 'production.orders.plan' ? '📋 PLANEJAMENTO DE PRODUÇÃO' : '🏭 PRODUÇÃO JÁ REALIZADA', '', 'Unidade: '.$location, 'Data: '.($action->payload['production_date'] ?? 'Não informada'), ''];
+        foreach ($action->payload['items'] ?? [] as $item) {
+            $name = isset($item['product_id']) ? Product::query()->find($item['product_id'])?->name : ($item['product_name'] ?? 'Produto pendente');
+            $lines[] = $name.': '.($item['planned_quantity'] ?? $item['produced_quantity'] ?? $item['quantity'] ?? '?');
+        }
+        $lines[] = '';
+        $lines[] = 'Confirmar?';
+
+        return implode("\n", $lines);
+    }
+
+    private function transferQuestion(PendingAgentAction $action, User $user): ErpAgentResponse
+    {
+        $locationIds = $this->authorization->accessibleLocations($user)->pluck('id');
+        $candidates = StockTransfer::query()->with(['sourceLocation', 'destinationLocation', 'items.product'])
+            ->where('status', 'in_transit')->whereIn('destination_location_id', $locationIds)->latest('dispatched_date')->limit(10)->get();
+        if ($candidates->isEmpty()) {
+            return new ErpAgentResponse(true, 'Não há transferência em trânsito para uma unidade autorizada.', pendingAction: ['id' => $action->id]);
+        }
+        $stored = $candidates->map(fn ($transfer) => ['id' => $transfer->id])->all();
+        $action->update(['payload' => [...$action->payload, '_transfer_candidates' => $stored]]);
+        $lines = ['Qual transferência foi recebida?', ''];
+        foreach ($candidates->values() as $index => $transfer) {
+            $lines[] = ($index + 1).'. '.$transfer->sourceLocation->name.' → '.$transfer->destinationLocation->name;
+            foreach ($transfer->items as $item) {
+                $lines[] = $item->product->name.': '.$item->quantity_sent.' '.$item->product->stock_unit;
+            }
+            $lines[] = '';
+        }
+
+        return new ErpAgentResponse(true, implode("\n", $lines), 'menu', pendingAction: ['id' => $action->id]);
     }
 
     private function menu(User $user): ErpAgentResponse
@@ -349,6 +448,7 @@ class ErpAgentService
         return match ($name) {
             'stock.positions.list' => new ErpAgentResponse(true, $this->templates->stock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'ingredient_stock.positions.list' => new ErpAgentResponse(true, $this->templates->ingredientStock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
+            'ingredient_stock.shortages.list' => new ErpAgentResponse(true, $this->templates->ingredientShortages($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'production.today' => new ErpAgentResponse(true, $this->templates->productions($result, Location::query()->findOrFail($input['location_id'])->name, $input['date'] ?? now()->toDateString()), data: ['count' => $result->count()]),
             'production.suggestions.list' => new ErpAgentResponse(true, $this->templates->productionSuggestions($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => count($result)]),
             'transfers.list' => new ErpAgentResponse(true, $this->templates->transfers($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),

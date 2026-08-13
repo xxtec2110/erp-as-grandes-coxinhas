@@ -147,8 +147,10 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/financeiro/configuracoes/centros', [FinanceController::class, 'center'])->middleware('permission:finance.accounts.manage')->name('finance.centers.store');
     Route::get('/compras/documentos', [PurchaseDocumentController::class, 'index'])->middleware('permission:purchases.view')->name('purchases.index');
     Route::get('/compras/documentos/criar', [PurchaseDocumentController::class, 'create'])->middleware('permission:purchases.create')->name('purchases.create');
+    Route::get('/compras/documentos/{document}', [PurchaseDocumentController::class, 'show'])->middleware('permission:purchases.view')->name('purchases.show');
     Route::post('/compras/documentos', [PurchaseDocumentController::class, 'store'])->middleware('permission:purchases.create')->name('purchases.store');
     Route::post('/compras/documentos/{document}/receber', [PurchaseDocumentController::class, 'receive'])->middleware('permission:purchases.receive')->name('purchases.receive');
+    Route::post('/compras/documentos/{document}/recebimentos', [PurchaseDocumentController::class, 'receivePartial'])->middleware('permission:purchases.receive')->name('purchases.receipts.store');
     Route::post('/compras/documentos/{document}/conta-a-pagar', [PurchaseDocumentController::class, 'payable'])->middleware('permission:finance.payables.create')->name('purchases.payable.store');
     Route::get('/configuracoes/taxas-venda', [PaymentFeeController::class, 'index'])->middleware('permission:payment_fees.view')->name('payment-fees.index');
     Route::get('/configuracoes/taxas-venda/lote', [PaymentFeeController::class, 'batch'])->middleware('permission:payment_fees.manage')->name('payment-fees.batch');

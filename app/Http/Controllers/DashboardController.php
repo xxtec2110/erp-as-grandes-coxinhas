@@ -6,6 +6,7 @@ use App\Models\Payable;
 use App\Models\ProductionOrder;
 use App\Models\StockTransfer;
 use App\Services\AuthorizationService;
+use App\Services\IngredientShortageService;
 use App\Services\OperationalSummaryService;
 use App\Services\StockPositionService;
 use Illuminate\Http\Request;
@@ -13,7 +14,7 @@ use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    public function __invoke(Request $request, AuthorizationService $authorization, OperationalSummaryService $summary, StockPositionService $stock): View
+    public function __invoke(Request $request, AuthorizationService $authorization, OperationalSummaryService $summary, StockPositionService $stock, IngredientShortageService $shortages): View
     {
         $locations = $authorization->accessibleLocations($request->user());
         $location = $locations->firstWhere('id', $request->integer('location_id')) ?? $locations->firstWhere('id', $request->user()->default_location_id) ?? $locations->first();
@@ -28,6 +29,7 @@ class DashboardController extends Controller
             'openPayables' => $authorization->allows($request->user(), 'dashboard.financial.view') ? Payable::query()->whereIn('location_id', $locationIds)->whereNotIn('status', ['paid', 'cancelled'])->sum('expected_amount') : null,
             'plannedOrders' => $location ? ProductionOrder::query()->where('location_id', $location->id)->where('status', 'planned')->count() : 0,
             'completedOrders' => $location ? ProductionOrder::query()->where('location_id', $location->id)->where('status', 'completed')->whereBetween('production_date', [$start, $end])->count() : 0,
+            'ingredientShortages' => $location && $authorization->allows($request->user(), 'ingredient_stock.view', $location->id) ? $shortages->forLocation($location) : [],
         ]);
     }
 

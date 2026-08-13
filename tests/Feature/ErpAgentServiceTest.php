@@ -127,6 +127,27 @@ class ErpAgentServiceTest extends TestCase
         $this->assertDatabaseHas('production_records', ['product_id' => $product->id, 'location_id' => $this->ibira->id, 'planned_quantity' => '100.000000']);
     }
 
+    public function test_ambiguous_product_resolution_preserves_all_photo_items(): void
+    {
+        $this->known('photo-producer', ['production.orders.create'], [$this->ibira]);
+        $frango = Product::query()->create(['name' => 'Frango', 'stock_unit' => 'un', 'active' => true]);
+        $catupiry = Product::query()->create(['name' => 'Frango com Catupiry', 'stock_unit' => 'un', 'active' => true]);
+        $costela = Product::query()->create(['name' => 'Costela', 'stock_unit' => 'un', 'active' => true]);
+        $items = [
+            ['product_name' => 'Frango', 'planned_quantity' => '80'],
+            ['product_id' => $costela->id, 'product_name' => 'Costela', 'planned_quantity' => '40'],
+        ];
+        $question = $this->agent()->handle($this->message('photo-producer', 'foto', 'photo-1', ['tool' => 'production.orders.plan', 'arguments' => ['location_id' => $this->ibira->id, 'production_date' => now()->toDateString(), 'items' => $items], 'missing_fields' => ['product_id']]));
+        $this->assertStringContainsString('mais de uma possibilidade', $question->message);
+
+        $preview = $this->agent()->handle($this->message('photo-producer', '2', 'photo-2'));
+
+        $this->assertSame('confirmation', $preview->responseType);
+        $this->assertStringContainsString('Frango com Catupiry: 80', $preview->message);
+        $this->assertStringContainsString('Costela: 40', $preview->message);
+        $this->assertDatabaseHas('pending_agent_actions', ['tool_name' => 'production.orders.plan', 'status' => 'pending']);
+    }
+
     public function test_finance_query_is_deterministic_and_does_not_call_fake_ai(): void
     {
         $user = $this->known('finance', ['finance.payables.view'], [$this->catanduva]);

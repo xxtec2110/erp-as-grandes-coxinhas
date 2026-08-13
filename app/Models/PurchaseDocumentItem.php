@@ -11,7 +11,7 @@ class PurchaseDocumentItem extends Model
 
     protected function casts(): array
     {
-        return ['quantity' => 'decimal:6', 'unit_price' => 'decimal:4', 'total_price' => 'decimal:2'];
+        return ['quantity' => 'decimal:6', 'received_quantity' => 'decimal:6', 'unit_price' => 'decimal:4', 'total_price' => 'decimal:2'];
     }
 
     public function ingredient(): BelongsTo

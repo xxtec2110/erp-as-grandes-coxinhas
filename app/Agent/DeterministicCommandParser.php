@@ -70,6 +70,7 @@ class DeterministicCommandParser
             $value === 'FINANCEIRO' => ['action' => 'submenu', 'submenu' => 'finance'],
             $value === 'ESTOQUE' => ['tool' => 'stock.positions.list'],
             $value === 'ESTOQUE DE INSUMOS' => ['tool' => 'ingredient_stock.positions.list'],
+            in_array($value, ['INSUMOS EM FALTA', 'INSUMOS BAIXOS'], true) => ['tool' => 'ingredient_stock.shortages.list'],
             str_starts_with($value, 'ESTOQUE ') => ['tool' => 'stock.positions.list', 'location_name' => trim(mb_substr($trimmed, 8))],
             $value === 'PRODUCAO HOJE' => ['tool' => 'production.today', 'date' => now()->toDateString()],
             $value === 'PRODUCAO SUGERIDA' => ['tool' => 'production.suggestions.list'],
