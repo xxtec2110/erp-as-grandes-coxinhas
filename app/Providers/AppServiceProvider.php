@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Agent\AiProviderInterface;
 use App\Agent\FakeAiProvider;
+use App\Agent\OpenAiProvider;
 use App\Agent\UnavailableAiProvider;
 use App\WhatsApp\DisabledWhatsAppClient;
 use App\WhatsApp\FakeWhatsAppClient;
@@ -19,9 +20,12 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(AiProviderInterface::class, function () {
-            $provider = (string) config('agent_costs.provider', 'disabled');
+            $provider = (string) config('ai.provider', 'disabled');
             if ($provider === 'fake' && app()->environment(['local', 'testing'])) {
                 return new FakeAiProvider;
+            }
+            if ($provider === 'openai' && config('ai.openai.enabled') && filled(config('ai.openai.api_key'))) {
+                return app(OpenAiProvider::class);
             }
 
             return new UnavailableAiProvider;

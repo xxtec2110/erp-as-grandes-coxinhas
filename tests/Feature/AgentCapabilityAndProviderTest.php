@@ -45,7 +45,8 @@ class AgentCapabilityAndProviderTest extends TestCase
             $identity->update([$flag => true]);
             $this->assertSame('channel_not_allowed', $this->agent($type, null, $type.'-denied', $type)->errorCode);
             $this->grant($user, $permission);
-            $this->assertSame('media_processing_unavailable', $this->agent($type, null, $type.'-allowed', $type)->errorCode);
+            $expected = $type === 'audio' ? 'media_processing_unavailable' : 'media_attachment_required';
+            $this->assertSame($expected, $this->agent($type, null, $type.'-allowed', $type)->errorCode);
         }
     }
 
@@ -62,7 +63,7 @@ class AgentCapabilityAndProviderTest extends TestCase
 
     public function test_testing_resolves_fake_but_production_never_uses_it_and_fails_closed(): void
     {
-        config()->set('agent_costs.provider', 'fake');
+        config()->set('ai.provider', 'fake');
         $this->app->forgetInstance(AiProviderInterface::class);
         $this->assertInstanceOf(FakeAiProvider::class, app(AiProviderInterface::class));
 

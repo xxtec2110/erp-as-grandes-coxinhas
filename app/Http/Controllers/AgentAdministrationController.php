@@ -67,7 +67,13 @@ class AgentAdministrationController extends Controller
             'whatsapp_statuses' => $count('whatsapp_status_received'),
         ];
 
-        return view('agent.observability.index', ['metrics' => $metrics, 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
+        $provider = (string) config('ai.provider', 'disabled');
+        $model = (string) config('ai.models.text', '');
+        $providerStatus = $provider === 'fake' && app()->environment(['local', 'testing'])
+            ? 'simulação local'
+            : ($provider === 'openai' && config('ai.openai.enabled') && filled(config('ai.openai.api_key')) && $model !== '' ? 'configurado' : 'não configurado');
+
+        return view('agent.observability.index', ['metrics' => $metrics, 'providerConfig' => ['provider' => $provider, 'model' => $model, 'status' => $providerStatus], 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
     }
 
     public function updateCosts(Request $request, AgentCostService $costs): RedirectResponse

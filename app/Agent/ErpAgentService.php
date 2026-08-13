@@ -2,13 +2,16 @@
 
 namespace App\Agent;
 
+use App\Models\AgentAttachment;
 use App\Models\AgentConversation;
 use App\Models\Location;
 use App\Models\PendingAgentAction;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Services\AgentCostService;
 use App\Services\AgentEventService;
+use App\Services\AiInterpretationService;
 use App\Services\AuthorizationService;
 use App\Services\UndoLastOperationService;
 use DomainException;
@@ -17,7 +20,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -63,6 +66,7 @@ class ErpAgentService
             $this->events->record('action_denied', $message->channel, $user, $conversation->id, $message->externalMessageId);
             $response = ErpAgentResponse::error('Você não possui autorização para essa operação ou unidade.', 'forbidden', 'unauthorized');
         } catch (DomainException $exception) {
+            $this->events->record('tool_validation_failed', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'failed', errorCode: 'validation_error');
             $response = ErpAgentResponse::error($exception->getMessage(), 'validation_error');
         } catch (Throwable) {
             $this->events->record('internal_error', $message->channel, $user, $conversation->id, $message->externalMessageId);
@@ -76,11 +80,15 @@ class ErpAgentService
 
     private function dispatch(AgentMessage $message, User $user, AgentConversation $conversation): ErpAgentResponse
     {
-        if (! in_array($message->messageType, ['text', 'interactive'], true)) {
+        if ($message->messageType === 'audio') {
             return ErpAgentResponse::error(
                 'Recebi a mídia, mas áudio, imagem e documento ainda não podem ser processados. Envie a informação em texto.',
                 'media_processing_unavailable',
             );
+        }
+
+        if (in_array($message->messageType, ['image', 'document'], true) && $message->attachments === []) {
+            return ErpAgentResponse::error('A mídia não possui um anexo privado autorizado.', 'media_attachment_required');
         }
 
         $text = trim($message->text ?? '');
@@ -93,28 +101,49 @@ class ErpAgentService
         }
         $intent = $this->parser->parse($text);
         if ($intent !== null) {
-            $this->events->record('deterministic_command', $message->channel, $user, $conversation->id, $message->externalMessageId, $intent['tool']);
+            $this->events->record('deterministic_command', $message->channel, $user, $conversation->id, $message->externalMessageId, $intent['tool'] ?? null, ['action' => $intent['action'] ?? 'tool', 'submenu' => $intent['submenu'] ?? null]);
         }
         if ($intent === null) {
             $channelIdentity = UserExternalIdentity::query()->where('channel', $message->channel)->where('external_user_id', $message->externalUserId)->first();
             $testIntent = app()->environment('testing') && isset($message->metadata['fake_intent']);
-            if (! $testIntent && ($channelIdentity === null || ! $channelIdentity->free_chat_allowed || ! $this->authorization->allows($user, 'agent.free_chat.use') || $this->costs->summary()['saving_mode'])) {
+            $freeTextDenied = in_array($message->messageType, ['text', 'interactive'], true) && ($channelIdentity === null || ! $channelIdentity->free_chat_allowed || ! $this->authorization->allows($user, 'agent.free_chat.use'));
+            if (! $testIntent && ($freeTextDenied || $this->costs->summary()['saving_mode'])) {
                 return ErpAgentResponse::error('Não entendi o comando. Envie MENU para ver as opções.', 'command_not_understood');
             }
             $started = hrtime(true);
             $provider = class_basename($this->ai);
             $this->events->record('ai_provider_selected', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'selected', metadata: ['provider' => $provider]);
             try {
-                $intent = $this->ai->interpret($message, array_keys($this->allowedTools($user)), $conversation->context ?? []);
+                $interpretation = $this->interpretations->interpret($message, array_keys($this->allowedTools($user)), $user, $conversation->context ?? []);
+            } catch (AiProviderResponseException) {
+                $this->events->record('ai_response_invalid', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'rejected', errorCode: 'ai_response_invalid', metadata: ['provider' => $provider]);
+
+                return ErpAgentResponse::error('A interpretação recebida não passou na validação. Reformule a solicitação ou tente mais tarde.', 'ai_response_invalid');
             } catch (AiProviderUnavailableException) {
                 $this->events->record('ai_provider_unavailable', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'unavailable', errorCode: 'ai_provider_unavailable', metadata: ['provider' => $provider]);
 
                 return ErpAgentResponse::error('Serviço de interpretação por IA temporariamente indisponível.', 'ai_provider_unavailable');
             }
+            if ($interpretation === null) {
+                return ErpAgentResponse::error('Não foi possível interpretar a solicitação com segurança.', 'command_not_understood');
+            }
+            if ((float) $interpretation->confidence < (float) config('ai.minimum_confidence', '0.70')) {
+                $this->events->record('ai_low_confidence', $message->channel, $user, $conversation->id, $message->externalMessageId, $interpretation->tool, status: 'rejected', errorCode: 'ai_low_confidence');
+
+                return ErpAgentResponse::error('Não consegui identificar a solicitação com segurança. Informe os dados de outra forma.', 'ai_low_confidence');
+            }
+            $intent = ['tool' => $interpretation->tool, 'arguments' => [...$interpretation->fields, '_ai_missing_fields' => $interpretation->missingFields]];
             $this->events->record('ai_called', $message->channel, $user, $conversation->id, $message->externalMessageId, $intent['tool'] ?? null);
-            $this->costs->record('ai', 'ai_text', 'ai-text:'.$message->externalMessageId, $user, ['model' => config('agent_costs.models.text'), 'duration_ms' => (int) ((hrtime(true) - $started) / 1_000_000)]);
+            if (! ($interpretation->usage['cached'] ?? false)) {
+                $usageType = in_array($message->messageType, ['image', 'document'], true) ? 'ai_vision' : 'ai_text';
+                $this->costs->record('openai', $usageType, 'ai:'.$message->externalMessageId, $user, [...$interpretation->usage, 'location_id' => $interpretation->fields['location_id'] ?? null, 'duration_ms' => (int) ((hrtime(true) - $started) / 1_000_000), 'operation_type' => $interpretation->tool]);
+            }
         }
         if ($intent === null || ! isset($intent['tool'])) {
+            if (($intent['action'] ?? null) === 'submenu' && isset($intent['submenu'])) {
+                return $this->submenu($intent['submenu'], $user, $message, $conversation);
+            }
+
             return ErpAgentResponse::error('Não entendi o comando. Envie MENU para ver as opções.', 'command_not_understood');
         }
         if ($intent['tool'] === 'agent.operations.undo') {
@@ -137,17 +166,26 @@ class ErpAgentService
             return new ErpAgentResponse(true, 'De qual unidade?', 'menu', options: $this->authorization->accessibleLocations($user)->map(fn ($location) => ['id' => $location->id, 'label' => $location->name])->all(), pendingAction: ['id' => $action->id]);
         }
         if ($tool->writesData && $tool->confirmationRequired) {
-            $input['idempotency_key'] ??= $message->externalMessageId;
-            $missing = $this->missing($name, $input);
-            $action = $this->pending->prepare($user, $name, $input, $missing, $message->externalMessageId.':action', $conversation->id);
+            $sourceKey = $this->sourceKey($message);
+            $input['idempotency_key'] ??= $sourceKey;
+            $aiMissing = $input['_ai_missing_fields'] ?? [];
+            unset($input['_ai_missing_fields']);
+            $missing = array_values(array_unique([...$this->missing($name, $input), ...$aiMissing]));
+            $action = $this->pending->prepare($user, $name, $input, $missing, $sourceKey.':action', $conversation->id);
             if ($missing !== []) {
+                if (in_array('supplier_id', $missing, true) && isset($input['_supplier_match']['candidates'])) {
+                    $names = collect($input['_supplier_match']['candidates'])->pluck('name')->implode(', ');
+
+                    return new ErpAgentResponse(true, $names !== '' ? 'Encontrei fornecedores parecidos: '.$names.'. Qual deles é o correto?' : 'Não encontrei esse fornecedor cadastrado.', pendingAction: ['id' => $action->id]);
+                }
+
                 return new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
             }
 
             return $this->confirmation($action);
         }
         $result = $this->executor->execute($name, $input, $user);
-        $this->events->record('tool_executed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name);
+        $this->events->record('tool_executed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['location_id' => $input['location_id'] ?? null, 'result' => 'success'], status: 'success');
 
         return $this->format($name, $result, $input);
     }
@@ -200,6 +238,20 @@ class ErpAgentService
 
             return $this->confirmation($action);
         }
+        if (in_array('supplier_id', $action->missing_fields ?? [], true)) {
+            $candidateIds = collect(data_get($action->payload, '_supplier_match.candidates', []))->pluck('id')->map(fn ($id) => (int) $id);
+            $matches = Supplier::query()->whereIn('id', $candidateIds)->get()->filter(fn (Supplier $supplier) => (string) $supplier->id === trim($text) || mb_strtolower(trim($supplier->name)) === mb_strtolower(trim($text)));
+            if ($matches->count() !== 1) {
+                return ErpAgentResponse::error('Fornecedor não encontrado ou ambíguo. Informe o nome completo de uma das opções.', 'ambiguous_supplier');
+            }
+            $payload = $action->payload;
+            unset($payload['_supplier_match']);
+            $payload['supplier_id'] = $matches->first()->id;
+            $missing = $this->missing($action->tool_name, $payload);
+            $action->update(['payload' => $payload, 'missing_fields' => $missing]);
+
+            return $missing === [] ? $this->confirmation($action->refresh()) : new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
+        }
 
         return ErpAgentResponse::error('A resposta não corresponde à ação pendente.', 'invalid_pending_answer');
     }
@@ -218,8 +270,15 @@ class ErpAgentService
     private function menu(User $user): ErpAgentResponse
     {
         $options = [];
-        foreach ([['stock.view', 'Consultar estoque', 'ESTOQUE'], ['production.create', 'Registrar produção', 'PRODUÇÃO'], ['finance.view', 'Financeiro', 'FINANCEIRO HOJE'], ['purchases.view', 'Compras', 'COMPRAS']] as [$permission, $label, $command]) {
-            if ($this->authorization->allows($user, $permission)) {
+        foreach ([
+            [['stock.view'], 'Consultar estoque', 'ESTOQUE'],
+            [['production.view', 'production.create', 'production_requirements.view'], 'Produção', 'PRODUÇÃO'],
+            [['finance.payables.view', 'finance.payments.view', 'finance.reports.view'], 'Financeiro', 'FINANCEIRO'],
+            [['purchases.view'], 'Compras', 'COMPRAS'],
+            [['transfers.view'], 'Transferências', 'TRANSFERÊNCIAS'],
+            [['reports.view'], 'Relatório operacional', 'RELATÓRIO OPERACIONAL'],
+        ] as [$permissions, $label, $command]) {
+            if ($this->allowsAny($user, $permissions)) {
                 $options[] = ['label' => $label, 'command' => $command];
             }
         }
@@ -227,12 +286,58 @@ class ErpAgentService
         return new ErpAgentResponse(true, 'Olá, '.$user->name."! 👋\n\nO que você deseja fazer?", 'menu', options: $options);
     }
 
+    private function submenu(string $name, User $user, AgentMessage $message, AgentConversation $conversation): ErpAgentResponse
+    {
+        $definitions = match ($name) {
+            'production' => [
+                ['production.view', 'Produção de hoje', 'PRODUÇÃO HOJE'],
+                ['production.create', 'Planejar: PRODUZIMOS <quantidade> <produto>', null],
+                ['production_requirements.view', 'Produção sugerida', 'PRODUÇÃO SUGERIDA'],
+            ],
+            'purchases' => [
+                ['purchases.view', 'Documentos recentes', 'DOCUMENTOS RECENTES'],
+                ['purchases.view', 'Consultar: DOCUMENTO <número>', null],
+                ['purchases.view', 'Itens: ITENS DOCUMENTO <número>', null],
+            ],
+            'finance' => [
+                ['finance.payables.view', 'Contas a pagar', 'CONTAS A PAGAR'],
+                ['finance.payables.view', 'Contas vencidas', 'CONTAS VENCIDAS'],
+                ['finance.reports.view', 'Financeiro de hoje', 'FINANCEIRO HOJE'],
+                ['finance.reports.view', 'Financeiro do mês', 'FINANCEIRO MÊS'],
+            ],
+            'transfers' => [
+                ['transfers.view', 'Transferências recentes', 'TRANSFERÊNCIAS RECENTES'],
+                ['transfers.view', 'Em trânsito', 'TRANSFERÊNCIAS EM TRÂNSITO'],
+                ['transfers.view', 'Pendentes de recebimento', 'PENDENTES DE RECEBIMENTO'],
+            ],
+            default => [],
+        };
+        $options = collect($definitions)
+            ->filter(fn (array $definition) => $this->authorization->allows($user, $definition[0]))
+            ->map(fn (array $definition) => ['label' => $definition[1], 'command' => $definition[2]])
+            ->values()
+            ->all();
+        if ($options === []) {
+            return ErpAgentResponse::error('Nenhuma opção deste menu está autorizada para o seu usuário.', 'submenu_not_authorized', 'unauthorized');
+        }
+        $this->events->record('submenu_opened', $message->channel, $user, $conversation->id, $message->externalMessageId, metadata: ['submenu' => $name], status: 'success');
+
+        return new ErpAgentResponse(true, 'Escolha uma opção:', 'menu', options: $options);
+    }
+
     private function format(string $name, mixed $result, array $input): ErpAgentResponse
     {
         return match ($name) {
             'stock.positions.list' => new ErpAgentResponse(true, $this->templates->stock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
+            'production.today' => new ErpAgentResponse(true, $this->templates->productions($result, Location::query()->findOrFail($input['location_id'])->name, $input['date'] ?? now()->toDateString()), data: ['count' => $result->count()]),
+            'production.suggestions.list' => new ErpAgentResponse(true, $this->templates->productionSuggestions($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => count($result)]),
+            'transfers.list' => new ErpAgentResponse(true, $this->templates->transfers($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),
+            'reports.operational.summary' => new ErpAgentResponse(true, $this->templates->operational($result, Location::query()->findOrFail($input['location_id'])->name), data: $result),
             'finance.payables.list' => new ErpAgentResponse(true, $this->templates->payables($result), data: ['count' => $result->count()]),
             'finance.reports.summary' => new ErpAgentResponse(true, $this->templates->finance($result), data: $result),
+            'purchases.documents.list' => new ErpAgentResponse(true, $this->templates->purchases($result), data: ['count' => $result->count()]),
+            'purchases.documents.get' => new ErpAgentResponse(true, $this->templates->purchase($result), data: ['id' => $result->id]),
+            'purchases.items.list' => new ErpAgentResponse(true, $this->templates->purchaseItems($result), data: ['count' => $result->count()]),
             default => new ErpAgentResponse(true, 'Consulta concluída.'),
         };
     }
@@ -265,5 +370,25 @@ class ErpAgentService
     private function allowedTools(User $user): array
     {
         return array_filter($this->registry->all(), fn ($tool) => $this->authorization->allows($user, $tool->permission));
+    }
+
+    private function sourceKey(AgentMessage $message): string
+    {
+        if (in_array($message->messageType, ['image', 'document'], true) && count($message->attachments) === 1) {
+            $reference = $message->attachments[0];
+            $id = is_array($reference) ? ($reference['id'] ?? null) : $reference;
+            $hash = AgentAttachment::query()->whereKey($id)->value('content_hash');
+            if (filled($hash)) {
+                return 'attachment:'.$hash;
+            }
+        }
+
+        return $message->externalMessageId;
+    }
+
+    /** @param array<int, string> $permissions */
+    private function allowsAny(User $user, array $permissions): bool
+    {
+        return collect($permissions)->contains(fn (string $permission) => $this->authorization->allows($user, $permission));
     }
 }
