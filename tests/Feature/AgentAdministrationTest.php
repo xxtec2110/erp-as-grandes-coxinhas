@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\UserExternalIdentity;
 use Database\Seeders\AuthorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class AgentAdministrationTest extends TestCase
@@ -89,6 +90,24 @@ class AgentAdministrationTest extends TestCase
         $this->actingAs($admin)->get(route('agent.simulator'))->assertOk()->assertSee('🧪 FAKE')->assertSee('🔴 LIVE TEST');
         $this->actingAs($admin)->post(route('agent.simulator.send'), ['provider' => 'fake', 'text' => 'OI'])->assertOk()->assertSee('Agente');
         $this->actingAs($admin)->from(route('agent.simulator'))->post(route('agent.simulator.send'), ['provider' => 'live', 'text' => 'teste'])->assertRedirect(route('agent.simulator'))->assertSessionHasErrors('provider');
+    }
+
+    public function test_simulator_transcribes_fake_audio_once_and_uses_deterministic_parser(): void
+    {
+        $admin = User::factory()->create(['is_super_admin' => true]);
+        $location = Location::query()->create(['name' => 'Unidade de áudio', 'type' => 'production', 'active' => true]);
+
+        $response = $this->actingAs($admin)->post(route('agent.simulator.send'), [
+            'provider' => 'fake',
+            'attachment' => UploadedFile::fake()->createWithContent('audio.ogg', 'OggSfake-audio'),
+            'fake_transcription' => 'MENU',
+            'location_id' => $location->id,
+        ]);
+
+        $response->assertOk()->assertSee('O que você deseja fazer?');
+        $this->assertDatabaseHas('agent_usage_costs', ['provider' => 'fake', 'usage_type' => 'ai_audio']);
+        $this->assertDatabaseHas('agent_events', ['event_type' => 'audio_transcribed']);
+        $this->assertDatabaseMissing('agent_events', ['event_type' => 'ai_called']);
     }
 
     public function test_observability_lists_events_and_interaction_without_exposing_a_parallel_audit(): void

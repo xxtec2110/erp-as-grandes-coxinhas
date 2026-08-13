@@ -68,7 +68,7 @@ class AgentMediaService
             return $this->copy($message, $message->messageType, $message->text, collect($stored)->pluck('id')->all());
         }
         $attachment = $stored[0] ?? throw new DomainException('audio_attachment_missing');
-        $transcription = $this->transcription($attachment, $identity->user, $location->id, $message);
+        $transcription = $this->transcribeStored($attachment, $identity->user, $location->id, $message);
         if (trim($transcription) === '') {
             throw new DomainException('audio_transcription_empty');
         }
@@ -76,7 +76,7 @@ class AgentMediaService
         return $this->copy($message, 'transcribed_audio', $transcription, [$attachment->id]);
     }
 
-    private function transcription(AgentAttachment $attachment, User $user, int $locationId, AgentMessage $message): string
+    public function transcribeStored(AgentAttachment $attachment, User $user, int $locationId, AgentMessage $message): string
     {
         $key = hash('sha256', implode('|', [$attachment->content_hash, config('ai.audio_provider'), config('ai.models.audio')]));
         $cached = data_get($attachment->metadata, 'audio_transcriptions.'.$key);
