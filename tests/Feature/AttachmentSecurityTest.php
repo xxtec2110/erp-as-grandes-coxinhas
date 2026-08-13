@@ -6,6 +6,8 @@ use App\Models\AgentAttachment;
 use App\Models\Location;
 use App\Models\Permission;
 use App\Models\User;
+use App\Services\AgentAttachmentService;
+use App\WhatsApp\DownloadedMedia;
 use Database\Seeders\AuthorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -103,6 +105,17 @@ class AttachmentSecurityTest extends TestCase
         $other = $this->authorized('purchases.create', Location::query()->create(['name' => 'Outra', 'type' => 'store', 'active' => true]));
         $this->actingAs($other)->post(route('attachments.store'), [...$this->payload($this->pdf(), 'purchase'), 'location_id' => $other->locations()->firstOrFail()->id])->assertRedirect()->assertSessionHasErrors('attachment');
         $this->assertDatabaseCount('agent_attachments', 1);
+    }
+
+    public function test_downloaded_audio_uses_signature_allowlist_and_rejects_false_mime(): void
+    {
+        $user = $this->authorized('agent.audio.use');
+        $service = app(AgentAttachmentService::class);
+        $valid = $service->storeDownloaded(new DownloadedMedia('audio-valid', 'audio/ogg', 'audio.ogg', 'OggSvalid-audio'), 'agent', $this->location->id, 'temporary', $user);
+
+        $this->assertSame('audio/ogg', $valid->mime_type);
+        $this->expectException(\DomainException::class);
+        $service->storeDownloaded(new DownloadedMedia('audio-false', 'audio/ogg', 'audio.ogg', '%PDF-not-audio'), 'agent', $this->location->id, 'temporary', $user);
     }
 
     private function authorized(string $permission, ?Location $location = null): User

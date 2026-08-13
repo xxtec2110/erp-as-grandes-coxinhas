@@ -33,6 +33,13 @@ class AiInterpretationService
         if ($result->tool !== null && ! in_array($result->tool, $availableTools, true)) {
             throw new DomainException('ai_tool_not_allowed');
         }
+        if (count($authorized) === 1) {
+            $this->promotePurpose($authorized[0], $result->tool);
+            $cacheKey = $this->cacheKey($authorized, $availableTools);
+        }
+        if (count($authorized) === 1 && in_array($result->tool, ['finance.payments.record', 'finance.payables.create', 'purchases.documents.create'], true)) {
+            $result = new AiInterpretation($result->intent, $result->tool, $result->confidence, [...$result->fields, 'agent_attachment_id' => $authorized[0]->id], $result->missingFields, $result->sourceType, $result->documentType, $result->summary, $result->usage);
+        }
         $result = $this->matchSupplier($result);
         $result = $this->matchIngredients($result);
         if ($cacheKey !== null) {
@@ -66,13 +73,14 @@ class AiInterpretationService
     private function matchSupplier(AiInterpretation $result): AiInterpretation
     {
         $name = $result->fields['supplier_name'] ?? $result->fields['beneficiary'] ?? null;
-        if (! is_string($name)) {
+        $document = $result->fields['supplier_document_number'] ?? $result->fields['supplier_tax_id'] ?? $result->fields['cnpj'] ?? null;
+        if (! is_string($name) && ! is_string($document)) {
             return $result;
         }
-        $match = $this->suppliers->match($name);
+        $match = $this->suppliers->match(is_string($name) ? $name : null, is_string($document) ? $document : null);
         $fields = $result->fields;
         $missing = $result->missingFields;
-        if ($match['status'] === 'exact') {
+        if (in_array($match['status'], ['fiscal_exact', 'name_exact'], true)) {
             $fields['supplier_id'] = $match['supplier_id'];
         } else {
             $fields['_supplier_match'] = ['status' => $match['status'], 'candidates' => $match['candidates']];
@@ -91,6 +99,21 @@ class AiInterpretationService
         $fields['items'] = $this->ingredients->matchItems($fields['items']);
 
         return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, $result->missingFields, $result->sourceType, $result->documentType, $result->summary, $result->usage);
+    }
+
+    private function promotePurpose(AgentAttachment $attachment, ?string $tool): void
+    {
+        $purpose = match ($tool) {
+            'finance.payments.record', 'finance.payables.create' => 'finance',
+            'purchases.documents.create' => 'purchase',
+            default => null,
+        };
+        if ($purpose === null) {
+            return;
+        }
+        $metadata = $attachment->metadata ?? [];
+        $metadata['purpose'] = $purpose;
+        $attachment->update(['metadata' => $metadata]);
     }
 
     private function cacheKey(array $attachments, array $tools): ?string

@@ -38,10 +38,10 @@ class ErpAgentService
             return ErpAgentResponse::error('Seu acesso ainda não está aprovado ou está bloqueado.', 'identity_not_approved', 'unauthorized');
         }
         $requiredPermission = match ($message->messageType) {
-            'audio' => 'agent.audio.use', 'image' => 'agent.image.use', 'document' => 'agent.document.use', default => 'agent.text.use'
+            'audio', 'transcribed_audio' => 'agent.audio.use', 'image' => 'agent.image.use', 'document' => 'agent.document.use', default => 'agent.text.use'
         };
         $identityFlag = match ($message->messageType) {
-            'audio' => $identity->voice_allowed, 'image' => $identity->image_allowed, 'document' => $identity->document_allowed, default => $identity->structured_commands_allowed
+            'audio', 'transcribed_audio' => $identity->voice_allowed, 'image' => $identity->image_allowed, 'document' => $identity->document_allowed, default => $identity->structured_commands_allowed
         };
         $permissionAllowed = $this->authorization->allows($identity->user, $requiredPermission);
         if (! $identityFlag || ! $permissionAllowed) {
@@ -106,7 +106,7 @@ class ErpAgentService
         if ($intent === null) {
             $channelIdentity = UserExternalIdentity::query()->where('channel', $message->channel)->where('external_user_id', $message->externalUserId)->first();
             $testIntent = app()->environment('testing') && isset($message->metadata['fake_intent']);
-            $freeTextDenied = in_array($message->messageType, ['text', 'interactive'], true) && ($channelIdentity === null || ! $channelIdentity->free_chat_allowed || ! $this->authorization->allows($user, 'agent.free_chat.use'));
+            $freeTextDenied = in_array($message->messageType, ['text', 'interactive', 'transcribed_audio'], true) && ($channelIdentity === null || ! $channelIdentity->free_chat_allowed || ! $this->authorization->allows($user, 'agent.free_chat.use'));
             if (! $testIntent && ($freeTextDenied || $this->costs->summary()['saving_mode'])) {
                 return ErpAgentResponse::error('Não entendi o comando. Envie MENU para ver as opções.', 'command_not_understood');
             }
@@ -374,7 +374,7 @@ class ErpAgentService
 
     private function sourceKey(AgentMessage $message): string
     {
-        if (in_array($message->messageType, ['image', 'document'], true) && count($message->attachments) === 1) {
+        if (in_array($message->messageType, ['image', 'document', 'transcribed_audio'], true) && count($message->attachments) === 1) {
             $reference = $message->attachments[0];
             $id = is_array($reference) ? ($reference['id'] ?? null) : $reference;
             $hash = AgentAttachment::query()->whereKey($id)->value('content_hash');

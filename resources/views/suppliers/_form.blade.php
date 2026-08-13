@@ -13,6 +13,11 @@
         <input id="name" name="name" class="form-input" required value="{{ old('name', $supplier?->name) }}">
     </div>
     <div>
+        <label for="document_number" class="form-label">CNPJ</label>
+        <input id="document_number" name="document_number" class="form-input" inputmode="numeric" placeholder="00.000.000/0000-00" value="{{ old('document_number', $supplier?->document_number) }}">
+        <p class="mt-1 text-xs text-stone-500">Opcional. A máscara é removida para comparação segura.</p>
+    </div>
+    <div>
         <label for="contact_name" class="form-label">Contato</label>
         <input id="contact_name" name="contact_name" class="form-input" value="{{ old('contact_name', $supplier?->contact_name) }}">
     </div>

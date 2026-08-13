@@ -2,14 +2,16 @@
 
 namespace App\WhatsApp;
 
+use App\Agent\ErpAgentResponse;
 use App\Agent\ErpAgentService;
-use App\Models\AgentAttachment;
 use App\Models\AgentConversationMessage;
 use App\Models\WhatsAppInboundMessage;
 use App\Models\WhatsAppWebhookEvent;
 use App\Services\AgentCostService;
 use App\Services\AgentEventService;
+use App\Services\AgentMediaService;
 use App\Services\WhatsAppConnectionService;
+use DomainException;
 use Throwable;
 
 class WhatsAppChannelAdapter
@@ -23,6 +25,7 @@ class WhatsAppChannelAdapter
         private WhatsAppConnectionService $connection,
         private AgentCostService $costs,
         private WhatsAppFailureClassifier $failures,
+        private AgentMediaService $media,
     ) {}
 
     public function handle(array $payload, int $attempt = 1, bool $finalAttempt = false, int $retryDelay = 5): void
@@ -72,15 +75,24 @@ class WhatsAppChannelAdapter
 
                 continue;
             }
-            if ($inbound->wasRecentlyCreated) {
-                foreach ($message->attachments as $attachment) {
-                    AgentAttachment::query()->create(['source' => 'whatsapp', 'external_id' => $attachment['provider_media_id'] ?? null, 'mime_type' => $attachment['mime_type'] ?? null, 'whatsapp_inbound_message_id' => $inbound->id, 'metadata' => array_diff_key($attachment, array_flip(['url']))]);
-                }
-            }
             try {
                 $inbound->update(['status' => 'processing', 'attempts' => max($inbound->attempts + 1, $attempt), 'next_retry_at' => null]);
                 $event->update(['status' => 'processing', 'error_code' => null]);
-                $response = $this->agent->handle($message);
+                try {
+                    $message = $this->media->prepare($message, $inbound);
+                    $response = $this->agent->handle($message);
+                } catch (DomainException $mediaException) {
+                    $code = $mediaException->getMessage();
+                    $text = match ($code) {
+                        'media_expired_or_not_found' => 'A mídia não está mais disponível. Por favor, envie o arquivo novamente.',
+                        'audio_transcription_empty' => 'Não consegui entender esse áudio com segurança. Pode repetir ou escrever a informação?',
+                        'media_location_required' => 'Antes de processar a mídia, informe ao administrador qual é a sua unidade padrão.',
+                        'media_blocked_by_saving_mode' => 'O processamento de mídia está temporariamente suspenso pelo modo de economia.',
+                        default => 'Não foi possível validar essa mídia com segurança. Envie novamente em um formato permitido.',
+                    };
+                    $this->events->record('media_processing_rejected', 'whatsapp', messageId: $message->externalMessageId, status: 'rejected', errorCode: $code);
+                    $response = ErpAgentResponse::error($text, $code);
+                }
                 $conversationMessage = AgentConversationMessage::query()->where('external_message_id', $message->externalMessageId)->first();
                 $inboundStatus = $response->responseType === 'confirmation' ? 'awaiting_confirmation' : ($response->success ? 'processed' : 'review_required');
                 $inbound->update(['agent_conversation_message_id' => $conversationMessage?->id, 'error_code' => $response->errorCode]);

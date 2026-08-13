@@ -3,13 +3,21 @@
 namespace App\Providers;
 
 use App\Agent\AiProviderInterface;
+use App\Agent\AudioTranscriptionProviderInterface;
 use App\Agent\FakeAiProvider;
+use App\Agent\FakeAudioTranscriptionProvider;
+use App\Agent\OpenAiAudioTranscriptionProvider;
 use App\Agent\OpenAiProvider;
 use App\Agent\UnavailableAiProvider;
+use App\Agent\UnavailableAudioTranscriptionProvider;
 use App\WhatsApp\DisabledWhatsAppClient;
 use App\WhatsApp\FakeWhatsAppClient;
+use App\WhatsApp\FakeWhatsAppMediaDownloader;
 use App\WhatsApp\MetaWhatsAppClient;
+use App\WhatsApp\MetaWhatsAppMediaDownloader;
+use App\WhatsApp\UnavailableWhatsAppMediaDownloader;
 use App\WhatsApp\WhatsAppClientInterface;
+use App\WhatsApp\WhatsAppMediaDownloaderInterface;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -39,6 +47,20 @@ class AppServiceProvider extends ServiceProvider
             }
 
             return new DisabledWhatsAppClient;
+        });
+        $this->app->singleton(WhatsAppMediaDownloaderInterface::class, function () {
+            return match ((string) config('whatsapp.media_downloader')) {
+                'fake' => app()->environment(['local', 'testing']) ? new FakeWhatsAppMediaDownloader : new UnavailableWhatsAppMediaDownloader,
+                'meta' => config('whatsapp.media_download_enabled') ? new MetaWhatsAppMediaDownloader : new UnavailableWhatsAppMediaDownloader,
+                default => new UnavailableWhatsAppMediaDownloader,
+            };
+        });
+        $this->app->singleton(AudioTranscriptionProviderInterface::class, function () {
+            return match ((string) config('ai.audio_provider')) {
+                'fake' => app()->environment(['local', 'testing']) ? new FakeAudioTranscriptionProvider : new UnavailableAudioTranscriptionProvider,
+                'openai' => config('ai.openai.enabled') && filled(config('ai.openai.api_key')) ? new OpenAiAudioTranscriptionProvider : new UnavailableAudioTranscriptionProvider,
+                default => new UnavailableAudioTranscriptionProvider,
+            };
         });
     }
 

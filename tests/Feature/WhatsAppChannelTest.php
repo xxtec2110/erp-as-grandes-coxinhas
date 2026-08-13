@@ -136,8 +136,8 @@ class WhatsAppChannelTest extends TestCase
         $payload['entry'][0]['changes'][0]['value']['messages'][0]['audio'] = ['id' => 'media-safe-id', 'mime_type' => 'audio/ogg'];
         app(WhatsAppChannelAdapter::class)->handle($payload);
 
-        $this->assertStringContainsString('ainda não podem ser processados', $this->client->sent()[0]['text']);
-        $this->assertDatabaseHas('agent_conversation_messages', ['external_message_id' => 'wamid.audio']);
+        $this->assertStringContainsString('unidade padrão', $this->client->sent()[0]['text']);
+        $this->assertDatabaseHas('whatsapp_inbound_messages', ['external_message_id' => 'wamid.audio', 'status' => 'review_required']);
     }
 
     public function test_status_and_non_message_events_are_observed_without_becoming_user_messages(): void

@@ -7,16 +7,29 @@ use Illuminate\Support\Str;
 
 class SupplierMatchService
 {
-    public function match(?string $name): array
+    public function match(?string $name, ?string $documentNumber = null): array
     {
-        if (! filled($name)) {
+        $suppliers = Supplier::query()->where('active', true)->get();
+        $fiscal = preg_replace('/\D+/', '', (string) $documentNumber) ?: null;
+        $needle = filled($name) ? $this->normalize($name) : null;
+        if ($fiscal !== null) {
+            $fiscalMatch = $suppliers->firstWhere('document_number', $fiscal);
+            $nameMatch = $needle ? $suppliers->first(fn (Supplier $supplier) => $this->normalize($supplier->name) === $needle) : null;
+            if ($fiscalMatch !== null && $nameMatch !== null && $fiscalMatch->id !== $nameMatch->id) {
+                return ['status' => 'conflict', 'supplier_id' => null, 'candidates' => [['id' => $fiscalMatch->id, 'name' => $fiscalMatch->name], ['id' => $nameMatch->id, 'name' => $nameMatch->name]]];
+            }
+            if ($fiscalMatch !== null) {
+                return ['status' => 'fiscal_exact', 'supplier_id' => $fiscalMatch->id, 'candidates' => []];
+            }
+
+            return ['status' => 'fiscal_not_found', 'supplier_id' => null, 'candidates' => $nameMatch ? [['id' => $nameMatch->id, 'name' => $nameMatch->name]] : []];
+        }
+        if ($needle === null) {
             return ['status' => 'missing', 'supplier_id' => null, 'candidates' => []];
         }
-        $needle = $this->normalize($name);
-        $suppliers = Supplier::query()->where('active', true)->get();
         $exact = $suppliers->filter(fn (Supplier $supplier) => $this->normalize($supplier->name) === $needle);
         if ($exact->count() === 1) {
-            return ['status' => 'exact', 'supplier_id' => $exact->first()->id, 'candidates' => []];
+            return ['status' => 'name_exact', 'supplier_id' => $exact->first()->id, 'candidates' => []];
         }
         $candidates = $suppliers->filter(function (Supplier $supplier) use ($needle): bool {
             $candidate = $this->normalize($supplier->name);

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AgentAttachment;
 use App\Models\User;
+use App\WhatsApp\DownloadedMedia;
 use DomainException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -29,7 +30,11 @@ class AgentAttachmentService
         if (! is_int($size) || $size < 1) {
             throw new DomainException('O arquivo está vazio ou não pôde ser lido.');
         }
-        $limitMb = str_starts_with($mime, 'image/') ? (int) config('attachments.max_image_mb') : (int) config('attachments.max_document_mb');
+        $limitMb = match (true) {
+            str_starts_with($mime, 'image/') => (int) config('attachments.max_image_mb'),
+            str_starts_with($mime, 'audio/') => (int) config('attachments.max_audio_mb'),
+            default => (int) config('attachments.max_document_mb'),
+        };
         if ($size > $limitMb * 1024 * 1024) {
             throw new DomainException("O arquivo excede o limite de {$limitMb} MB.");
         }
@@ -69,6 +74,29 @@ class AgentAttachmentService
         return $attachment->refresh();
     }
 
+    public function storeDownloaded(DownloadedMedia $media, string $purpose, int $locationId, string $retentionType, User $user, ?int $inboundMessageId = null): AgentAttachment
+    {
+        $existing = AgentAttachment::query()->where('source', 'whatsapp')->where('external_id', $media->mediaId)->where('created_by', $user->id)->whereNotNull('path')->first();
+        if ($existing !== null) {
+            return $existing;
+        }
+        $temporary = tempnam(sys_get_temp_dir(), 'agent-media-');
+        if (! is_string($temporary) || file_put_contents($temporary, $media->contents) === false) {
+            throw new DomainException('Não foi possível preparar a mídia temporária.');
+        }
+        try {
+            $file = new UploadedFile($temporary, $media->filename, $media->mimeType, null, true);
+            $attachment = $this->store($file, $purpose, $locationId, $retentionType, $user);
+            $metadata = $attachment->metadata ?? [];
+            $metadata['provider_media_id'] = $media->mediaId;
+            $attachment->update(['source' => 'whatsapp', 'external_id' => $media->mediaId, 'whatsapp_inbound_message_id' => $inboundMessageId, 'metadata' => $metadata]);
+
+            return $attachment->refresh();
+        } finally {
+            @unlink($temporary);
+        }
+    }
+
     public function authorizeDownload(AgentAttachment $attachment, User $user): void
     {
         $purpose = (string) ($attachment->metadata['purpose'] ?? str_replace('web_', '', $attachment->source));
@@ -98,7 +126,11 @@ class AgentAttachmentService
         $permission = match ($purpose) {
             'purchase' => $write ? 'purchases.create' : 'purchases.view',
             'finance' => $write ? 'finance.payments.create' : 'finance.view',
-            default => str_starts_with($mime, 'image/') ? 'agent.image.use' : 'agent.document.use',
+            default => match (true) {
+                str_starts_with($mime, 'image/') => 'agent.image.use',
+                str_starts_with($mime, 'audio/') => 'agent.audio.use',
+                default => 'agent.document.use',
+            },
         };
         $this->authorization->authorize($user, $permission, $locationId);
     }
@@ -123,6 +155,10 @@ class AgentAttachmentService
             str_starts_with($header, '%PDF-') => 'application/pdf',
             str_starts_with($header, "\x89PNG\r\n\x1a\n") => 'image/png',
             str_starts_with($header, "\xFF\xD8\xFF") => 'image/jpeg',
+            str_starts_with($header, 'OggS') => 'audio/ogg',
+            str_starts_with($header, 'ID3'), str_starts_with($header, "\xFF\xFB"), str_starts_with($header, "\xFF\xF3"), str_starts_with($header, "\xFF\xF2") => 'audio/mpeg',
+            substr($header, 4, 4) === 'ftyp' => 'audio/mp4',
+            str_starts_with($header, "#!AMR\n") => 'audio/amr',
             default => throw new DomainException('A assinatura do arquivo não corresponde a PDF, JPEG ou PNG.'),
         };
     }
