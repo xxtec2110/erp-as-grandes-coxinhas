@@ -12,6 +12,13 @@ class DeterministicCommandParser
         $trimmed = trim($text);
         $value = mb_strtoupper(Str::ascii($trimmed));
 
+        if (preg_match('/^LIBERA AUDIO PARA (.+)$/', $value, $matches) === 1) {
+            return ['tool' => 'agent.access.permission.grant', 'arguments' => ['target_user_name' => trim($matches[1]), 'permission' => 'agent.audio.use']];
+        }
+        if (preg_match('/^(?:BLOQUEIA|REVOGA) AUDIO (?:DO|PARA) (.+)$/', $value, $matches) === 1) {
+            return ['tool' => 'agent.access.permission.revoke', 'arguments' => ['target_user_name' => trim($matches[1]), 'permission' => 'agent.audio.use']];
+        }
+
         if (preg_match('/^PRODUZIMOS\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+)$/ui', $trimmed, $matches) === 1) {
             $name = mb_strtolower(trim($matches[2]));
             $product = Product::query()->where('active', true)->get()

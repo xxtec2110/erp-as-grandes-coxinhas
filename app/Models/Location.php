@@ -14,11 +14,11 @@ class Location extends Model
 
     public const TYPE_STORE = 'store';
 
-    protected $fillable = ['name', 'type', 'active'];
+    protected $fillable = ['name', 'type', 'daily_sales_target', 'active'];
 
     protected function casts(): array
     {
-        return ['active' => 'boolean'];
+        return ['active' => 'boolean', 'daily_sales_target' => 'decimal:6'];
     }
 
     public function stockMovements(): HasMany

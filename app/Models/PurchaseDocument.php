@@ -12,7 +12,7 @@ class PurchaseDocument extends Model
 
     protected function casts(): array
     {
-        return ['issue_date' => 'date', 'due_date' => 'date', 'total_amount' => 'decimal:2'];
+        return ['issue_date' => 'date', 'due_date' => 'date', 'received_date' => 'date', 'received_at' => 'datetime', 'total_amount' => 'decimal:2'];
     }
 
     public function supplier(): BelongsTo

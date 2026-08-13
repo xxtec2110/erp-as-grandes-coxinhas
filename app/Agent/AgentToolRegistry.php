@@ -2,6 +2,7 @@
 
 namespace App\Agent;
 
+use App\Services\AgentAccessManagementService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
@@ -10,11 +11,13 @@ use App\Services\OperationalSummaryService;
 use App\Services\ProductionQueryService;
 use App\Services\ProductionRequirementService;
 use App\Services\ProductionService;
+use App\Services\ProductLossService;
 use App\Services\PurchaseDocumentActionService;
 use App\Services\PurchaseQueryService;
 use App\Services\RegisterPaymentService;
 use App\Services\StockPositionService;
 use App\Services\StockTransferQueryService;
+use App\Services\StockTransferService;
 use App\Services\UndoLastOperationService;
 
 class AgentToolRegistry
@@ -22,11 +25,21 @@ class AgentToolRegistry
     public function all(): array
     {
         return collect([
+            new AgentToolDefinition('agent.access.permission.grant', 'users.manage', false, true, true, ['target_user_name' => 'string', 'permission' => 'string'], ['id' => 'integer'], AgentAccessManagementService::class),
+            new AgentToolDefinition('agent.access.permission.revoke', 'users.manage', false, true, true, ['target_user_name' => 'string', 'permission' => 'string'], ['id' => 'integer'], AgentAccessManagementService::class),
+            new AgentToolDefinition('agent.access.location.grant', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
+            new AgentToolDefinition('agent.access.location.revoke', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
+            new AgentToolDefinition('agent.access.default_location.set', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('stock.positions.list', 'stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], StockPositionService::class),
             new AgentToolDefinition('production.today', 'production.view', true, false, false, ['location_id' => 'integer', 'date' => 'date'], ['items' => 'array'], ProductionQueryService::class),
             new AgentToolDefinition('production.suggestions.list', 'production_requirements.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], ProductionRequirementService::class),
             new AgentToolDefinition('production.plan', 'production.create', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'planned_quantity' => 'decimal', 'operation_date' => 'date', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductionService::class),
+            new AgentToolDefinition('production.complete', 'production.create', false, true, true, ['production_id' => 'integer', 'actual_quantity' => 'decimal'], ['id' => 'integer'], ProductionService::class),
+            new AgentToolDefinition('losses.record', 'losses.create', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'loss_reason_id' => 'integer', 'quantity' => 'decimal', 'operation_date' => 'date', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductLossService::class),
             new AgentToolDefinition('transfers.list', 'transfers.view', true, false, false, ['location_id' => 'integer', 'status' => 'string'], ['items' => 'array'], StockTransferQueryService::class),
+            new AgentToolDefinition('transfers.create', 'transfers.create', false, true, true, ['source_location_id' => 'integer', 'destination_location_id' => 'integer', 'product_id' => 'integer', 'quantity' => 'decimal', 'operation_date' => 'date', 'idempotency_key' => 'string'], ['id' => 'integer'], StockTransferService::class),
+            new AgentToolDefinition('transfers.dispatch', 'transfers.create', false, true, true, ['transfer_id' => 'integer', 'dispatch_date' => 'date'], ['id' => 'integer'], StockTransferService::class),
+            new AgentToolDefinition('transfers.receive', 'transfers.receive', false, true, true, ['transfer_id' => 'integer', 'received_date' => 'date', 'quantity_received' => 'decimal'], ['id' => 'integer'], StockTransferService::class),
             new AgentToolDefinition('reports.operational.summary', 'reports.view', true, false, false, ['location_id' => 'integer', 'period' => 'string'], ['summary' => 'object'], OperationalSummaryService::class),
             new AgentToolDefinition('finance.payables.list', 'finance.payables.view', true, false, false, ['period' => 'string', 'location_id' => 'integer|null', 'supplier' => 'string|null'], ['items' => 'array'], FinanceQueryService::class),
             new AgentToolDefinition('finance.payables.get', 'finance.payables.view', true, false, false, ['id' => 'integer'], ['payable' => 'object'], FinanceQueryService::class),

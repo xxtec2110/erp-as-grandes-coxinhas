@@ -1,25 +1,22 @@
 @extends('layouts.app')
 @section('title', 'Dashboard')
 @section('content')
-    <section class="rounded-2xl bg-stone-900 p-6 text-white shadow-sm sm:p-8">
-        <p class="text-sm font-medium text-amber-700">Acesso autenticado</p>
-        <h1 class="mt-2 text-2xl font-bold sm:text-3xl">Olá, {{ auth()->user()->name }}.</h1>
-        <p class="mt-3 max-w-2xl text-stone-300">Esta é a central operacional de As Grandes Coxinhas. Os módulos serão liberados gradualmente sem interromper os cadastros que já funcionam.</p>
-        <div class="mt-6 flex flex-wrap gap-2 text-xs font-semibold"><span class="rounded-full bg-emerald-400/15 px-3 py-1.5 text-emerald-300">3 áreas operacionais disponíveis</span><span class="rounded-full bg-white/10 px-3 py-1.5 text-stone-300">Próximos módulos em preparação</span></div>
-    </section>
-
-    <section class="mt-8">
-        <div class="mb-4"><h2 class="text-xl font-bold">Operação</h2><p class="mt-1 text-sm text-stone-600">Acesse as áreas disponíveis e acompanhe a evolução do sistema.</p></div>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <a href="{{ route('ingredients.index') }}" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md"><span class="text-xs font-bold uppercase tracking-wide text-emerald-700">Disponível</span><strong class="mt-2 block text-lg">Insumos</strong><span class="mt-1 block text-sm text-stone-500">Compras, preços e custos normalizados</span></a>
-            <a href="{{ route('preparations.index') }}" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md"><span class="text-xs font-bold uppercase tracking-wide text-emerald-700">Disponível</span><strong class="mt-2 block text-lg">Preparo de Recheios</strong><span class="mt-1 block text-sm text-stone-500">Ingredientes, rendimento, GLP e custos</span></a>
-            <a href="{{ route('locations.index') }}" class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md"><span class="text-xs font-bold uppercase tracking-wide text-emerald-700">Disponível</span><strong class="mt-2 block text-lg">Unidades</strong><span class="mt-1 block text-sm text-stone-500">Fábrica e lojas da operação</span></a>
-
-            @foreach (['Montagem das Coxinhas', 'Produção', 'Produtos', 'Entradas / Recebimentos', 'Vendas', 'Perdas', 'Relatórios'] as $module)
-                <div class="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-5 text-stone-500"><span class="text-xs font-bold uppercase tracking-wide text-stone-400">Em breve</span><strong class="mt-2 block text-lg text-stone-600">{{ $module }}</strong><span class="mt-1 block text-sm">Será liberado em um próximo incremento.</span></div>
-            @endforeach
-        </div>
-    </section>
-
-    <section class="mt-8 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6"><div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><h2 class="text-lg font-bold">Configurações técnicas</h2><p class="mt-1 text-sm text-stone-600">Cadastros usados internamente pelos cálculos e pela operação.</p></div><div class="flex flex-wrap gap-2"><a class="btn-secondary" href="{{ route('ingredient-categories.index') }}">Categorias de insumos</a><a class="btn-secondary" href="{{ route('suppliers.index') }}">Fornecedores</a><a class="btn-secondary" href="{{ route('equipment.index') }}">Equipamentos</a><a class="btn-secondary" href="{{ route('glp-products.index') }}">GLP / Energia</a></div></div></section>
+<div class="page-header"><div><h1 class="page-title">Dashboard operacional</h1><p class="page-subtitle">Dados oficiais de {{ $startDate }} a {{ $endDate }}.</p></div></div>
+<form method="GET" class="form-card mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+    <label><span class="form-label">Unidade</span><select class="form-input" name="location_id">@foreach($locations as $item)<option value="{{ $item->id }}" @selected($location?->id === $item->id)>{{ $item->name }}</option>@endforeach</select></label>
+    <label><span class="form-label">Período</span><select class="form-input" name="period"><option value="today">Hoje</option><option value="week" @selected(request('period') === 'week')>Semana</option><option value="fortnight" @selected(request('period') === 'fortnight')>Quinzena</option><option value="month" @selected(request('period') === 'month')>Mês</option><option value="custom" @selected(request('period') === 'custom')>Personalizado</option></select></label>
+    <label><span class="form-label">Início</span><input class="form-input" type="date" name="start_date" value="{{ request('start_date', $startDate) }}"></label>
+    <label><span class="form-label">Fim</span><input class="form-input" type="date" name="end_date" value="{{ request('end_date', $endDate) }}"></label>
+    <button class="btn-primary">Atualizar</button>
+</form>
+@php($metric = fn($key) => collect($summary[$key] ?? [])->sum(fn($value) => (float) $value))
+<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    @foreach([['production','Produção'],['outbound','Vendas / saídas'],['losses','Perdas'],['receipts','Recebimentos']] as [$key,$label])<div class="metric-card"><p class="metric-label">{{ $label }}</p><p class="metric-value">{{ \App\Support\DecimalFormatter::format((string) $metric($key), 0) }}</p></div>@endforeach
+    <div class="metric-card"><p class="metric-label">Faturamento</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['revenue']['brl'] ?? '0', 2) }}</p></div>
+    <div class="metric-card"><p class="metric-label">Taxas comerciais</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['fees']['brl'] ?? '0', 2) }}</p></div>
+    <div class="metric-card"><p class="metric-label">Transferências em trânsito</p><p class="metric-value">{{ $inTransit }}</p></div>
+    @if($openPayables !== null)<div class="metric-card"><p class="metric-label">Contas a pagar abertas</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format((string) $openPayables, 2) }}</p></div>@endif
+</div>
+@if($location?->daily_sales_target)<section class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5"><p class="metric-label">Meta diária — {{ $location->name }}</p><p class="mt-2 text-2xl font-bold">Meta: {{ \App\Support\DecimalFormatter::format($location->daily_sales_target, 0) }} · Vendidas: {{ \App\Support\DecimalFormatter::format((string) $metric('outbound'), 0) }}</p></section>@endif
+<section class="mt-8"><h2 class="mb-4 text-lg font-bold">Estoque atual — {{ $location?->name }}</h2><div class="table-card"><table class="data-table"><thead><tr><th>Produto</th><th>Saldo</th><th>Situação</th></tr></thead><tbody>@forelse($positions as $row)<tr><td>{{ $row['product']->name }}</td><td>{{ \App\Support\DecimalFormatter::format($row['balance'], $row['product']->stock_unit === 'un' ? 0 : 3) }} {{ $row['product']->stock_unit }}</td><td>{{ $row['situation']->label() }}</td></tr>@empty<tr><td colspan="3" class="empty-state">Nenhum produto cadastrado.</td></tr>@endforelse</tbody></table></div></section>
 @endsection

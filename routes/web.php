@@ -6,6 +6,7 @@ use App\Http\Controllers\AgentAttachmentController;
 use App\Http\Controllers\AgentSimulatorController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\CardBrandController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EquipmentBurnerController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GlpPriceController;
@@ -27,6 +28,7 @@ use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\ProductionEquipmentController;
 use App\Http\Controllers\ProductionRequirementController;
 use App\Http\Controllers\ProductLossController;
+use App\Http\Controllers\ProductRecipeController;
 use App\Http\Controllers\ProductSaleController;
 use App\Http\Controllers\ProductStockPolicyController;
 use App\Http\Controllers\PurchaseDocumentController;
@@ -56,7 +58,7 @@ Route::middleware('guest')->group(function (): void {
 Route::middleware('auth')->group(function (): void {
     Route::post('/anexos', [AgentAttachmentController::class, 'store'])->name('attachments.store');
     Route::get('/anexos/{attachment}/download', [AgentAttachmentController::class, 'download'])->name('attachments.download');
-    Route::view('/dashboard', 'dashboard')->name('dashboard');
+    Route::get('/dashboard', DashboardController::class)->name('dashboard');
     Route::get('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'index'])->middleware('permission:users.manage')->name('agent.simulator');
     Route::post('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'send'])->middleware('permission:users.manage')->name('agent.simulator.send');
     Route::get('/configuracoes/agente/identidades', [AgentAdministrationController::class, 'identities'])->middleware('permission:users.manage')->name('agent.identities.index');
@@ -86,6 +88,8 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/produtos', [ProductController::class, 'store'])->middleware('permission:products.create')->name('products.store');
     Route::get('/produtos/{product}/editar', [ProductController::class, 'edit'])->middleware('permission:products.update')->name('products.edit');
     Route::put('/produtos/{product}', [ProductController::class, 'update'])->middleware('permission:products.update')->name('products.update');
+    Route::get('/produtos/{product}/ficha-tecnica', [ProductRecipeController::class, 'edit'])->middleware('permission:product_recipes.view')->name('products.recipe.edit');
+    Route::put('/produtos/{product}/ficha-tecnica', [ProductRecipeController::class, 'update'])->middleware('permission:product_recipes.manage')->name('products.recipe.update');
     Route::get('/estoque', [StockController::class, 'index'])->middleware('permission:stock.view')->name('stock.index');
     Route::get('/estoque/{product}/{location}', [StockController::class, 'show'])->middleware('permission:stock.view,location')->name('stock.show');
     Route::get('/estoque/{product}/{location}/ajustar', [StockAdjustmentController::class, 'create'])
@@ -136,6 +140,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/compras/documentos', [PurchaseDocumentController::class, 'index'])->middleware('permission:purchases.view')->name('purchases.index');
     Route::get('/compras/documentos/criar', [PurchaseDocumentController::class, 'create'])->middleware('permission:purchases.create')->name('purchases.create');
     Route::post('/compras/documentos', [PurchaseDocumentController::class, 'store'])->middleware('permission:purchases.create')->name('purchases.store');
+    Route::post('/compras/documentos/{document}/receber', [PurchaseDocumentController::class, 'receive'])->middleware('permission:purchases.receive')->name('purchases.receive');
     Route::get('/configuracoes/taxas-venda', [PaymentFeeController::class, 'index'])->middleware('permission:payment_fees.view')->name('payment-fees.index');
     Route::get('/configuracoes/taxas-venda/lote', [PaymentFeeController::class, 'batch'])->middleware('permission:payment_fees.manage')->name('payment-fees.batch');
     Route::post('/configuracoes/taxas-venda/previa', [PaymentFeeController::class, 'preview'])->middleware('permission:payment_fees.import')->name('payment-fees.preview');

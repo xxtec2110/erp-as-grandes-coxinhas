@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\PurchaseDocumentRequest;
+use App\Http\Requests\PurchaseReceiptRequest;
 use App\Models\CostCenter;
 use App\Models\FinanceCategory;
 use App\Models\Ingredient;
@@ -10,6 +11,7 @@ use App\Models\PurchaseDocument;
 use App\Models\Supplier;
 use App\Services\AuthorizationService;
 use App\Services\CreatePurchaseDocumentService;
+use App\Services\PurchaseReceiptService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -33,6 +35,13 @@ class PurchaseDocumentController
     {
         $s->create($r->validated(), $r->user());
 
-        return redirect()->route('purchases.index')->with('success','Documento cadastrado.');
+        return redirect()->route('purchases.index')->with('success', 'Documento cadastrado.');
+    }
+
+    public function receive(PurchaseReceiptRequest $request, PurchaseDocument $document, PurchaseReceiptService $service): RedirectResponse
+    {
+        $service->receive($document, $request->validated('received_date'), $request->user());
+
+        return back()->with('success', 'Mercadoria recebida e estoque de insumos atualizado.');
     }
 }

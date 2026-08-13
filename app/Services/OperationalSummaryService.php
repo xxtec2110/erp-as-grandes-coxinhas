@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\StockMovementType;
 use App\Models\Location;
+use App\Models\ProductSale;
 use App\Models\StockMovement;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
@@ -53,6 +54,10 @@ class OperationalSummaryService
                 $summary[$metric][$unit] = (string) BigDecimal::of($value)->abs()->toScale(6);
             }
         }
+
+        $sales = ProductSale::query()->whereBelongsTo($location)->whereBetween('operation_date', [$startDate, $endDate]);
+        $summary['revenue'] = ['brl' => (string) BigDecimal::of((clone $sales)->sum('gross_amount'))->toScale(2, RoundingMode::HalfUp)];
+        $summary['fees'] = ['brl' => (string) BigDecimal::of((clone $sales)->sum('fee_amount_snapshot'))->toScale(2, RoundingMode::HalfUp)];
 
         return $summary;
     }

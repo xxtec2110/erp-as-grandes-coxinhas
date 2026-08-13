@@ -24,6 +24,7 @@ class LocationRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', Rule::in([Location::TYPE_PRODUCTION, Location::TYPE_STORE])],
+            'daily_sales_target' => ['nullable', 'numeric', 'min:0', 'decimal:0,6'],
             'active' => ['required', 'boolean'],
         ];
     }

@@ -351,6 +351,9 @@ class ErpAgentService
                 $input['location_id'] = $matches->first()->id;
             } unset($input['location_name']);
         }
+        if (! isset($input['location_id']) && $user->default_location_id !== null && $locations->contains('id', $user->default_location_id)) {
+            $input['location_id'] = $user->default_location_id;
+        }
         if (! isset($input['location_id']) && $locations->count() === 1) {
             $input['location_id'] = $locations->first()->id;
         }
@@ -361,7 +364,7 @@ class ErpAgentService
     private function missing(string $name, array $input): array
     {
         $required = match ($name) {
-            'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
+            'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
         };
 
         return array_values(array_filter($required, fn ($key) => ! isset($input[$key]) || $input[$key] === ''));

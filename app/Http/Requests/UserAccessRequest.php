@@ -18,6 +18,6 @@ class UserAccessRequest extends FormRequest
 
     public function rules(): array
     {
-        return ['role_ids' => ['array'], 'role_ids.*' => ['integer', 'exists:roles,id'], 'location_ids' => ['array'], 'location_ids.*' => ['integer', 'exists:locations,id'], 'permission_overrides' => ['array'], 'permission_overrides.*' => ['in:inherit,allow,deny'], 'all_locations_access' => ['required', 'boolean']];
+        return ['role_ids' => ['array'], 'role_ids.*' => ['integer', 'exists:roles,id'], 'location_ids' => ['array'], 'location_ids.*' => ['integer', 'exists:locations,id'], 'default_location_id' => ['nullable', 'integer', 'exists:locations,id'], 'permission_overrides' => ['array'], 'permission_overrides.*' => ['in:inherit,allow,deny'], 'all_locations_access' => ['required', 'boolean']];
     }
 }
