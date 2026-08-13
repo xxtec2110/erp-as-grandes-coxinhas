@@ -7,7 +7,9 @@ use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
+use App\Services\IngredientStockPositionService;
 use App\Services\OperationalSummaryService;
+use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
 use App\Services\ProductionRequirementService;
 use App\Services\ProductionService;
@@ -31,9 +33,12 @@ class AgentToolRegistry
             new AgentToolDefinition('agent.access.location.revoke', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('agent.access.default_location.set', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('stock.positions.list', 'stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], StockPositionService::class),
+            new AgentToolDefinition('ingredient_stock.positions.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientStockPositionService::class),
             new AgentToolDefinition('production.today', 'production.view', true, false, false, ['location_id' => 'integer', 'date' => 'date'], ['items' => 'array'], ProductionQueryService::class),
             new AgentToolDefinition('production.suggestions.list', 'production_requirements.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], ProductionRequirementService::class),
             new AgentToolDefinition('production.plan', 'production.create', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'planned_quantity' => 'decimal', 'operation_date' => 'date', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductionService::class),
+            new AgentToolDefinition('production.orders.plan', 'production.orders.create', true, true, true, ['location_id' => 'integer', 'production_date' => 'date', 'items' => 'array', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductionOrderService::class),
+            new AgentToolDefinition('production.orders.complete_batch', 'production.orders.complete', true, true, true, ['location_id' => 'integer', 'production_date' => 'date', 'items' => 'array', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductionOrderService::class),
             new AgentToolDefinition('production.complete', 'production.create', false, true, true, ['production_id' => 'integer', 'actual_quantity' => 'decimal'], ['id' => 'integer'], ProductionService::class),
             new AgentToolDefinition('losses.record', 'losses.create', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'loss_reason_id' => 'integer', 'quantity' => 'decimal', 'operation_date' => 'date', 'idempotency_key' => 'string'], ['id' => 'integer'], ProductLossService::class),
             new AgentToolDefinition('transfers.list', 'transfers.view', true, false, false, ['location_id' => 'integer', 'status' => 'string'], ['items' => 'array'], StockTransferQueryService::class),

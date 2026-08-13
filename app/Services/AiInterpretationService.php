@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 
 class AiInterpretationService
 {
-    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients) {}
+    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients, private ProductMatchService $products) {}
 
     public function interpret(AgentMessage $message, array $availableTools, User $user, array $conversationContext = []): ?AiInterpretation
     {
@@ -42,6 +42,7 @@ class AiInterpretationService
         }
         $result = $this->matchSupplier($result);
         $result = $this->matchIngredients($result);
+        $result = $this->matchProducts($result);
         if ($cacheKey !== null) {
             $this->cache($authorized[0], $cacheKey, $result);
         }
@@ -101,11 +102,27 @@ class AiInterpretationService
         return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, $result->missingFields, $result->sourceType, $result->documentType, $result->summary, $result->usage);
     }
 
+    private function matchProducts(AiInterpretation $result): AiInterpretation
+    {
+        if (! isset($result->fields['items']) || ! is_array($result->fields['items']) || ! str_starts_with((string) $result->tool, 'production.orders.')) {
+            return $result;
+        }
+        $fields = $result->fields;
+        $fields['items'] = $this->products->matchItems($fields['items']);
+        $missing = $result->missingFields;
+        if (collect($fields['items'])->contains(fn ($item) => ! isset($item['product_id']))) {
+            $missing[] = 'product_id';
+        }
+
+        return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, array_values(array_unique($missing)), $result->sourceType, $result->documentType, $result->summary, $result->usage);
+    }
+
     private function promotePurpose(AgentAttachment $attachment, ?string $tool): void
     {
         $purpose = match ($tool) {
             'finance.payments.record', 'finance.payables.create' => 'finance',
             'purchases.documents.create' => 'purchase',
+            'production.orders.plan', 'production.orders.complete_batch' => 'production',
             default => null,
         };
         if ($purpose === null) {

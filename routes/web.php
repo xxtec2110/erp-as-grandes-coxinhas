@@ -14,6 +14,7 @@ use App\Http\Controllers\GlpProductController;
 use App\Http\Controllers\IngredientCategoryController;
 use App\Http\Controllers\IngredientController;
 use App\Http\Controllers\IngredientPriceController;
+use App\Http\Controllers\IngredientStockController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\LossReasonController;
 use App\Http\Controllers\OperationalReportController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\ProductCategoryController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\ProductionEquipmentController;
+use App\Http\Controllers\ProductionOrderController;
 use App\Http\Controllers\ProductionRequirementController;
 use App\Http\Controllers\ProductLossController;
 use App\Http\Controllers\ProductRecipeController;
@@ -102,6 +104,12 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/producao/{production}', [ProductionController::class, 'show'])->middleware('permission:production.view')->name('production.show');
     Route::post('/producao/{production}/concluir', [ProductionController::class, 'complete'])->middleware('permission:production.create')->name('production.complete');
     Route::post('/producao/{production}/cancelar', [ProductionController::class, 'cancel'])->middleware('permission:production.create')->name('production.cancel');
+    Route::get('/ordens-producao', [ProductionOrderController::class, 'index'])->middleware('permission:production.orders.view')->name('production-orders.index');
+    Route::get('/ordens-producao/criar', [ProductionOrderController::class, 'create'])->middleware('permission:production.orders.create')->name('production-orders.create');
+    Route::post('/ordens-producao', [ProductionOrderController::class, 'store'])->middleware('permission:production.orders.create')->name('production-orders.store');
+    Route::get('/ordens-producao/{order}', [ProductionOrderController::class, 'show'])->middleware('permission:production.orders.view')->name('production-orders.show');
+    Route::post('/ordens-producao/{order}/concluir', [ProductionOrderController::class, 'complete'])->middleware('permission:production.orders.complete')->name('production-orders.complete');
+    Route::post('/ordens-producao/{order}/reverter', [ProductionOrderController::class, 'reverse'])->middleware('permission:production.orders.reverse')->name('production-orders.reverse');
     Route::get('/transferencias', [StockTransferController::class, 'index'])->middleware('permission:transfers.view')->name('transfers.index');
     Route::get('/transferencias/criar', [StockTransferController::class, 'create'])->middleware('permission:transfers.create')->name('transfers.create');
     Route::post('/transferencias', [StockTransferController::class, 'store'])->middleware('permission:transfers.create')->name('transfers.store');
@@ -141,6 +149,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/compras/documentos/criar', [PurchaseDocumentController::class, 'create'])->middleware('permission:purchases.create')->name('purchases.create');
     Route::post('/compras/documentos', [PurchaseDocumentController::class, 'store'])->middleware('permission:purchases.create')->name('purchases.store');
     Route::post('/compras/documentos/{document}/receber', [PurchaseDocumentController::class, 'receive'])->middleware('permission:purchases.receive')->name('purchases.receive');
+    Route::post('/compras/documentos/{document}/conta-a-pagar', [PurchaseDocumentController::class, 'payable'])->middleware('permission:finance.payables.create')->name('purchases.payable.store');
     Route::get('/configuracoes/taxas-venda', [PaymentFeeController::class, 'index'])->middleware('permission:payment_fees.view')->name('payment-fees.index');
     Route::get('/configuracoes/taxas-venda/lote', [PaymentFeeController::class, 'batch'])->middleware('permission:payment_fees.manage')->name('payment-fees.batch');
     Route::post('/configuracoes/taxas-venda/previa', [PaymentFeeController::class, 'preview'])->middleware('permission:payment_fees.import')->name('payment-fees.preview');
@@ -171,6 +180,10 @@ Route::middleware('auth')->group(function (): void {
         ->middlewareFor(['edit', 'update'], 'permission:ingredients.update');
     Route::post('/insumos/{ingredient}/precos', [IngredientPriceController::class, 'store'])
         ->middleware('permission:ingredient_prices.update')->name('ingredients.prices.store');
+    Route::get('/estoque-insumos', [IngredientStockController::class, 'index'])->middleware('permission:ingredient_stock.view')->name('ingredient-stock.index');
+    Route::get('/estoque-insumos/{ingredient}', [IngredientStockController::class, 'show'])->middleware('permission:ingredient_stock.view')->name('ingredient-stock.show');
+    Route::post('/estoque-insumos/perdas', [IngredientStockController::class, 'loss'])->middleware('permission:ingredient_losses.create')->name('ingredient-stock.losses.store');
+    Route::post('/estoque-insumos/ajustes', [IngredientStockController::class, 'adjustment'])->middleware('permission:ingredient_stock.adjust')->name('ingredient-stock.adjustments.store');
     Route::resource('configuracoes/categorias-insumos', IngredientCategoryController::class)
         ->parameters(['categorias-insumos' => 'ingredientCategory'])
         ->names('ingredient-categories')

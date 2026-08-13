@@ -11,6 +11,7 @@ class AuthorizationSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
+            'production.orders.view' => 'Consultar ordens de produção', 'production.orders.create' => 'Criar ordens de produção', 'production.orders.complete' => 'Concluir ordens de produção', 'production.orders.cancel' => 'Cancelar ordens de produção', 'production.orders.reverse' => 'Reverter ordens concluídas', 'ingredient_losses.create' => 'Registrar perdas de insumos', 'ingredient_stock.adjust' => 'Ajustar estoque de insumos',
             'purchases.receive' => 'Receber mercadoria de compras', 'ingredient_stock.view' => 'Consultar estoque de insumos', 'product_recipes.view' => 'Consultar fichas técnicas de produtos', 'product_recipes.manage' => 'Gerenciar fichas técnicas de produtos', 'dashboard.financial.view' => 'Consultar indicadores financeiros no dashboard',
             'agent.text.use' => 'Usar texto no Agente', 'agent.image.use' => 'Enviar imagens ao Agente', 'agent.document.use' => 'Enviar documentos ao Agente', 'agent.audio.use' => 'Enviar áudio ao Agente', 'agent.free_chat.use' => 'Usar conversa livre com IA',
             'agent.whatsapp.manage_connection' => 'Gerenciar conexão do WhatsApp do Agente', 'agent.operations.undo' => 'Solicitar reversão pelo Agente',

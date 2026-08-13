@@ -16,7 +16,9 @@ use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
+use App\Services\IngredientStockPositionService;
 use App\Services\OperationalSummaryService;
+use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
 use App\Services\ProductionRequirementService;
 use App\Services\ProductionService;
@@ -32,7 +34,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false): mixed
     {
@@ -61,9 +63,12 @@ class AgentToolExecutor
             'agent.access.location.revoke' => $this->accessManagement->location($input, $user, false),
             'agent.access.default_location.set' => $this->accessManagement->defaultLocation($input, $user),
             'stock.positions.list' => $this->stockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
+            'ingredient_stock.positions.list' => $this->ingredientStockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.today' => $this->productionQuery->forDate(Location::query()->findOrFail($input['location_id']), $input['date'] ?? now()->toDateString()),
             'production.suggestions.list' => $this->productionRequirements->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.plan' => $this->production->plan($input, $user->id),
+            'production.orders.plan' => $this->productionOrders->plan($input, $user, 'agent'),
+            'production.orders.complete_batch' => $this->productionOrders->planAndComplete($input, $user, 'agent'),
             'production.complete' => $this->production->complete(ProductionRecord::query()->findOrFail($input['production_id']), (string) $input['actual_quantity'], $user->id),
             'losses.record' => $this->losses->record($input, $user->id),
             'transfers.list' => $this->transfers->list($user, (int) $input['location_id'], $input['status'] ?? 'recent'),
@@ -109,6 +114,7 @@ class AgentToolExecutor
         return match ($input['period'] ?? 'month') {
             'today' => [now()->toDateString(), now()->toDateString()],
             'week' => [now()->startOfWeek()->toDateString(), now()->endOfWeek()->toDateString()],
+            'fortnight' => [now()->subDays(14)->toDateString(), now()->toDateString()],
             default => [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()],
         };
     }

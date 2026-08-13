@@ -67,9 +67,10 @@
                     @foreach ([
                         ['route' => 'dashboard', 'label' => 'Dashboard', 'active' => 'dashboard'],
                         ['route' => 'ingredients.index', 'label' => 'Insumos', 'active' => 'ingredients.*', 'permission' => 'ingredients.view'],
+                        ['route' => 'ingredient-stock.index', 'label' => 'Estoque de Insumos', 'active' => 'ingredient-stock.*', 'permission' => 'ingredient_stock.view'],
                         ['route' => 'preparations.index', 'label' => 'Preparo de Recheios', 'active' => 'preparations.*', 'permission' => 'preparations.view'],
                         ['label' => 'Montagem das Coxinhas'],
-                        ['route' => 'production.index', 'label' => 'Produção', 'active' => 'production.*', 'permission' => 'production.view'],
+                        ['route' => 'production-orders.index', 'label' => 'Produção', 'active' => 'production-orders.*', 'permission' => 'production.orders.view'],
                         ['route' => 'products.index', 'label' => 'Produtos', 'active' => 'products.*', 'permission' => 'products.view'],
                         ['route' => 'stock.index', 'label' => 'Estoque', 'active' => 'stock.*', 'permission' => 'stock.view'],
                         ['route' => 'transfers.index', 'label' => 'Entradas / Recebimentos', 'active' => 'transfers.*', 'permission' => 'transfers.view'],

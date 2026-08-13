@@ -15,6 +15,7 @@
     <div class="metric-card"><p class="metric-label">Faturamento</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['revenue']['brl'] ?? '0', 2) }}</p></div>
     <div class="metric-card"><p class="metric-label">Taxas comerciais</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['fees']['brl'] ?? '0', 2) }}</p></div>
     <div class="metric-card"><p class="metric-label">Transferências em trânsito</p><p class="metric-value">{{ $inTransit }}</p></div>
+    <div class="metric-card"><p class="metric-label">Ordens planejadas</p><p class="metric-value">{{ $plannedOrders }}</p></div><div class="metric-card"><p class="metric-label">Ordens concluídas</p><p class="metric-value">{{ $completedOrders }}</p></div>
     @if($openPayables !== null)<div class="metric-card"><p class="metric-label">Contas a pagar abertas</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format((string) $openPayables, 2) }}</p></div>@endif
 </div>
 @if($location?->daily_sales_target)<section class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5"><p class="metric-label">Meta diária — {{ $location->name }}</p><p class="mt-2 text-2xl font-bold">Meta: {{ \App\Support\DecimalFormatter::format($location->daily_sales_target, 0) }} · Vendidas: {{ \App\Support\DecimalFormatter::format((string) $metric('outbound'), 0) }}</p></section>@endif

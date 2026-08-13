@@ -11,10 +11,12 @@ use App\Models\PurchaseDocument;
 use App\Models\Supplier;
 use App\Services\AuthorizationService;
 use App\Services\CreatePurchaseDocumentService;
+use App\Services\PurchasePayableService;
 use App\Services\PurchaseReceiptService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class PurchaseDocumentController
@@ -43,5 +45,16 @@ class PurchaseDocumentController
         $service->receive($document, $request->validated('received_date'), $request->user());
 
         return back()->with('success', 'Mercadoria recebida e estoque de insumos atualizado.');
+    }
+
+    public function payable(PurchaseDocument $document, Request $request, PurchasePayableService $service): RedirectResponse
+    {
+        try {
+            $service->create($document, $request->user());
+        } catch (\DomainException $exception) {
+            throw ValidationException::withMessages(['payable' => $exception->getMessage()]);
+        }
+
+        return back()->with('success', 'Conta a pagar vinculada ao documento.');
     }
 }

@@ -217,6 +217,25 @@ class ErpAgentService
 
             return $this->confirmation($action);
         }
+        if (preg_match('/(?:QUANTIDADE(?: CORRETA)?|CORRIGIR QUANTIDADE(?: PARA)?)\D*([0-9]+(?:[.,][0-9]+)*)/ui', $text, $matches) === 1) {
+            $field = collect(['quantity', 'actual_quantity', 'planned_quantity', 'quantity_received'])->first(fn ($candidate) => array_key_exists($candidate, $action->payload));
+            if ($field === null) {
+                return ErpAgentResponse::error('Esta prévia não possui quantidade simples corrigível.', 'correction_not_supported');
+            }
+            $action = $this->pending->merge($action, $user, [$field => str_replace(',', '.', $matches[1])], $this->missing($action->tool_name, [...$action->payload, $field => str_replace(',', '.', $matches[1])]));
+
+            return $this->confirmation($action);
+        }
+        if (preg_match('/(?:DATA|VENCIMENTO)(?: CORRETO| CORRETA)?\D*(\d{4}-\d{2}-\d{2})/ui', $text, $matches) === 1) {
+            $field = str_contains(mb_strtoupper($text), 'VENCIMENTO') ? 'due_date' : collect(['operation_date', 'production_date', 'received_date', 'dispatch_date', 'paid_at'])->first(fn ($candidate) => array_key_exists($candidate, $action->payload));
+            if ($field === null) {
+                return ErpAgentResponse::error('Esta prévia não possui data corrigível.', 'correction_not_supported');
+            }
+            $payload = [...$action->payload, $field => $matches[1]];
+            $action = $this->pending->merge($action, $user, [$field => $matches[1]], $this->missing($action->tool_name, $payload));
+
+            return $this->confirmation($action);
+        }
         if (in_array('location_id', $action->missing_fields ?? [], true)) {
             $locations = $this->authorization->accessibleLocations($user)->filter(fn ($location) => str_contains(mb_strtolower($location->name), mb_strtolower($text)));
             if ($locations->count() !== 1) {
@@ -329,6 +348,7 @@ class ErpAgentService
     {
         return match ($name) {
             'stock.positions.list' => new ErpAgentResponse(true, $this->templates->stock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
+            'ingredient_stock.positions.list' => new ErpAgentResponse(true, $this->templates->ingredientStock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'production.today' => new ErpAgentResponse(true, $this->templates->productions($result, Location::query()->findOrFail($input['location_id'])->name, $input['date'] ?? now()->toDateString()), data: ['count' => $result->count()]),
             'production.suggestions.list' => new ErpAgentResponse(true, $this->templates->productionSuggestions($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => count($result)]),
             'transfers.list' => new ErpAgentResponse(true, $this->templates->transfers($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),
@@ -364,7 +384,7 @@ class ErpAgentService
     private function missing(string $name, array $input): array
     {
         $required = match ($name) {
-            'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
+            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
         };
 
         return array_values(array_filter($required, fn ($key) => ! isset($input[$key]) || $input[$key] === ''));

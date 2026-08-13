@@ -12,7 +12,7 @@ class IngredientStockMovement extends Model
 
     protected function casts(): array
     {
-        return ['quantity_delta' => 'decimal:6', 'operation_date' => 'date'];
+        return ['quantity_delta' => 'decimal:6', 'unit_cost_snapshot' => 'decimal:8', 'operation_date' => 'date', 'metadata' => 'array'];
     }
 
     public function ingredient(): BelongsTo

@@ -7,6 +7,19 @@ use Brick\Math\BigDecimal;
 
 class AgentResponseTemplate
 {
+    public function ingredientStock(iterable $positions, string $location): string
+    {
+        $lines = ['📦 ESTOQUE DE INSUMOS', '', '🏭 '.$location, ''];
+        foreach ($positions as $position) {
+            $lines[] = $position['ingredient']->name.': '.DecimalFormatter::format($position['balance'], 3).' '.$position['ingredient']->base_unit;
+        }
+        if (count($lines) === 4) {
+            $lines[] = 'Nenhum insumo cadastrado.';
+        }
+
+        return implode("\n", $lines);
+    }
+
     public function stock(iterable $positions, string $location): string
     {
         $lines = ['📦 ESTOQUE', '', '🏭 '.$location, ''];

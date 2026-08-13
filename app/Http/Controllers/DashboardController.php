@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Payable;
+use App\Models\ProductionOrder;
 use App\Models\StockTransfer;
 use App\Services\AuthorizationService;
 use App\Services\OperationalSummaryService;
@@ -25,6 +26,8 @@ class DashboardController extends Controller
             'positions' => $location ? $stock->forLocation($location) : [],
             'inTransit' => StockTransfer::query()->where('status', 'in_transit')->where(fn ($query) => $query->whereIn('source_location_id', $locationIds)->orWhereIn('destination_location_id', $locationIds))->count(),
             'openPayables' => $authorization->allows($request->user(), 'dashboard.financial.view') ? Payable::query()->whereIn('location_id', $locationIds)->whereNotIn('status', ['paid', 'cancelled'])->sum('expected_amount') : null,
+            'plannedOrders' => $location ? ProductionOrder::query()->where('location_id', $location->id)->where('status', 'planned')->count() : 0,
+            'completedOrders' => $location ? ProductionOrder::query()->where('location_id', $location->id)->where('status', 'completed')->whereBetween('production_date', [$start, $end])->count() : 0,
         ]);
     }
 
