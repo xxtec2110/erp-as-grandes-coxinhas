@@ -26,7 +26,10 @@ class OpenAiProviderTest extends TestCase
 
         $this->assertSame('finance.payables.list', $result->tool);
         $this->assertSame(17, $result->usage['input_tokens']);
-        Http::assertSent(fn (Request $request) => $request['model'] === 'text-test' && data_get($request->data(), 'text.format.type') === 'json_schema' && str_contains($request['instructions'], 'Nunca autorize'));
+        Http::assertSent(fn (Request $request) => $request['model'] === 'text-test'
+            && data_get($request->data(), 'text.format.type') === 'json_schema'
+            && data_get($request->data(), 'text.format.strict') === false
+            && str_contains($request['instructions'], 'Nunca autorize'));
     }
 
     public function test_sends_authorized_image_and_pdf_in_native_input_formats(): void

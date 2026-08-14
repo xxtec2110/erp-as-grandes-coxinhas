@@ -31,7 +31,7 @@ class OpenAiProvider implements AiProviderInterface
             return null;
         }
         $tools = array_values(array_filter(array_map(fn (string $name) => app(AgentToolRegistry::class)->get($name), $availableTools)));
-        $payload = ['model' => $model, 'instructions' => $this->prompt->build($tools), 'input' => [['role' => 'user', 'content' => $content]], 'text' => ['format' => ['type' => 'json_schema', 'name' => 'erp_agent_interpretation', 'strict' => true, 'schema' => AgentInterpretationSchema::definition()]]];
+        $payload = ['model' => $model, 'instructions' => $this->prompt->build($tools), 'input' => [['role' => 'user', 'content' => $content]], 'text' => ['format' => ['type' => 'json_schema', 'name' => 'erp_agent_interpretation', 'strict' => false, 'schema' => AgentInterpretationSchema::definition()]]];
 
         $attempts = max(1, (int) config('ai.openai.max_attempts', 2));
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {

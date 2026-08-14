@@ -121,8 +121,9 @@ class ErpAgentService
                 $this->events->record('ai_response_invalid', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'rejected', errorCode: 'ai_response_invalid', metadata: ['provider' => $provider]);
 
                 return ErpAgentResponse::error('A interpretação recebida não passou na validação. Reformule a solicitação ou tente mais tarde.', 'ai_response_invalid');
-            } catch (AiProviderUnavailableException) {
-                $this->events->record('ai_provider_unavailable', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'unavailable', errorCode: 'ai_provider_unavailable', metadata: ['provider' => $provider]);
+            } catch (AiProviderUnavailableException $exception) {
+                $errorCode = $exception->getMessage();
+                $this->events->record('ai_provider_unavailable', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'unavailable', errorCode: $errorCode, metadata: ['provider' => $provider]);
 
                 return ErpAgentResponse::error('Serviço de interpretação por IA temporariamente indisponível.', 'ai_provider_unavailable');
             }
