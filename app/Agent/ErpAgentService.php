@@ -15,6 +15,7 @@ use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AiInterpretationService;
 use App\Services\AuthorizationService;
+use App\Services\RestrictedProductionInteractionService;
 use App\Services\UndoLastOperationService;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -22,7 +23,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -38,6 +39,9 @@ class ErpAgentService
             $this->events->record('unauthorized_identity', $message->channel, messageId: $message->externalMessageId, identityId: $identity->id, status: $identity->status, errorCode: 'identity_not_approved');
 
             return ErpAgentResponse::error('Seu acesso ainda não está aprovado ou está bloqueado.', 'identity_not_approved', 'unauthorized');
+        }
+        if (($restrictedResponse = $this->restrictedProduction->guard($message, $identity)) !== null) {
+            return $restrictedResponse;
         }
         $requiredPermission = match ($message->messageType) {
             'audio', 'transcribed_audio' => 'agent.audio.use', 'image' => 'agent.image.use', 'document' => 'agent.document.use', default => 'agent.text.use'

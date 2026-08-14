@@ -10,6 +10,7 @@ use App\Agent\OpenAiAudioTranscriptionProvider;
 use App\Agent\OpenAiProvider;
 use App\Agent\UnavailableAiProvider;
 use App\Agent\UnavailableAudioTranscriptionProvider;
+use App\Pdv\FakePdvProvider;
 use App\WhatsApp\DisabledWhatsAppClient;
 use App\WhatsApp\FakeWhatsAppClient;
 use App\WhatsApp\FakeWhatsAppMediaDownloader;
@@ -27,6 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(FakePdvProvider::class);
         $this->app->singleton(AiProviderInterface::class, function () {
             $provider = (string) config('ai.provider', 'disabled');
             if ($provider === 'fake' && app()->environment(['local', 'testing'])) {

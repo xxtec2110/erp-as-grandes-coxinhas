@@ -1,0 +1,5 @@
+@extends('layouts.app')
+@section('title','Eventos do PDV')
+@section('content')
+<div class="space-y-5"><div><a class="text-sm font-bold text-amber-700" href="{{ route('pdv.index') }}">← Integração PDV</a><h1 class="text-3xl font-bold">Eventos e sincronização</h1></div><div class="overflow-hidden rounded-xl border bg-white"><table class="w-full text-left text-sm"><thead class="bg-stone-50"><tr><th class="p-3">Data</th><th class="p-3">Evento</th><th class="p-3">Status</th><th class="p-3">Duração</th><th class="p-3">Lag</th></tr></thead><tbody>@forelse($events as $event)<tr class="border-t"><td class="p-3">{{ $event->created_at?->format('d/m/Y H:i:s') }}</td><td class="p-3">{{ $event->event_type }}</td><td class="p-3">{{ $event->status ?? '—' }}</td><td class="p-3">{{ $event->duration_ms ? $event->duration_ms.' ms' : '—' }}</td><td class="p-3">{{ $event->lag_seconds ? $event->lag_seconds.' s' : '—' }}</td></tr>@empty<tr><td colspan="5" class="p-6 text-center text-stone-500">Nenhum evento.</td></tr>@endforelse</tbody></table></div>{{ $events->links() }}</div>
+@endsection

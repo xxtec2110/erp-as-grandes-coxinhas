@@ -22,8 +22,8 @@
                         <details class="group relative">
                             <summary @class([
                                 'flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition marker:hidden sm:px-4',
-                                'border-amber-300 bg-amber-50 text-amber-900' => request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
-                                'border-stone-300 bg-white text-stone-700 hover:bg-stone-50' => ! request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
+                                'border-amber-300 bg-amber-50 text-amber-900' => request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
+                                'border-stone-300 bg-white text-stone-700 hover:bg-stone-50' => ! request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
                             ])>
                                 Configurações
                                 <span aria-hidden="true" class="text-xs transition group-open:rotate-180">▼</span>
@@ -43,6 +43,10 @@
                                         <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.whatsapp.index') }}">WhatsApp do Agente</a>
                                     @endif
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.simulator') }}">Simulador do Agente</a>
+                                    <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.usage') }}">Uso do Agente</a>
+                                    @if ($authorization->allows(auth()->user(), 'pdv.manage'))
+                                        <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('pdv.index') }}">Integrações · PDV / GrandChef</a>
+                                    @endif
                                 @endif
                                 @if ($authorization->allows(auth()->user(), 'payment_fees.view'))
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('payment-fees.index') }}">Taxas de Venda</a>

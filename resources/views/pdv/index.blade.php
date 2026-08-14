@@ -1,0 +1,13 @@
+@extends('layouts.app')
+@section('title','Integração PDV')
+@section('content')
+<div class="space-y-6">
+ <div><p class="text-sm font-semibold uppercase tracking-wider text-amber-700">Configurações · Integrações</p><h1 class="text-3xl font-bold">PDV / GrandChef</h1></div>
+ @if($connection)
+ <div class="rounded-xl border border-amber-300 bg-amber-50 p-5"><p class="font-bold text-amber-900">🟡 AGUARDANDO CREDENCIAIS/DOCUMENTAÇÃO</p><p class="mt-2 text-sm">Provider: {{ $connection->name }} · Modo: {{ $connection->enabled ? 'Ativo' : 'Desativado' }} · Health: {{ $connection->status }}</p></div>
+ <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">@foreach(['Última sincronização'=>$connection->last_success_at?->format('d/m/Y H:i') ?? '—','Última venda'=>$connection->last_sale_imported_at?->format('d/m/Y H:i') ?? '—','Pendentes'=>$connection->pending_count,'Erros'=>$connection->failed_count] as $label=>$value)<div class="rounded-xl border bg-white p-4"><p class="text-sm text-stone-500">{{ $label }}</p><p class="mt-1 text-xl font-bold">{{ $value }}</p></div>@endforeach</div>
+ <div class="flex flex-wrap gap-3"><a href="{{ route('pdv.mappings',$connection) }}" class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-bold text-white">Mapeamentos</a><a href="{{ route('pdv.events',$connection) }}" class="rounded-lg border px-4 py-2 text-sm font-bold">Eventos</a><form method="POST" action="{{ route('pdv.test',$connection) }}">@csrf<button class="rounded-lg border px-4 py-2 text-sm font-bold">Testar conexão</button></form><form method="POST" action="{{ route('pdv.sync',$connection) }}">@csrf<button class="rounded-lg border px-4 py-2 text-sm font-bold">Sincronizar</button></form></div>
+ @endif
+ <div class="overflow-hidden rounded-xl border bg-white"><table class="w-full text-left text-sm"><thead class="bg-stone-50"><tr><th class="p-3">Recebido</th><th class="p-3">Venda externa</th><th class="p-3">Tipo</th><th class="p-3">Status</th><th class="p-3"></th></tr></thead><tbody>@forelse($events as $event)<tr class="border-t"><td class="p-3">{{ $event->received_at?->format('d/m/Y H:i:s') }}</td><td class="p-3">{{ $event->external_sale_id ?? '—' }}</td><td class="p-3">{{ $event->event_type }}</td><td class="p-3">{{ $event->status }}</td><td class="p-3">@if(in_array($event->status,['waiting_mapping','failed']))<form method="POST" action="{{ route('pdv.events.reprocess',$event) }}">@csrf<button class="font-bold text-amber-700">Reprocessar</button></form>@endif</td></tr>@empty<tr><td colspan="5" class="p-6 text-center text-stone-500">Nenhum evento recebido.</td></tr>@endforelse</tbody></table></div>{{ $events->links() }}
+</div>
+@endsection

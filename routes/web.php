@@ -4,6 +4,7 @@ use App\Http\Controllers\AcquirerController;
 use App\Http\Controllers\AgentAdministrationController;
 use App\Http\Controllers\AgentAttachmentController;
 use App\Http\Controllers\AgentSimulatorController;
+use App\Http\Controllers\AgentUsageReportController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\CardBrandController;
 use App\Http\Controllers\DashboardController;
@@ -19,6 +20,7 @@ use App\Http\Controllers\LocationController;
 use App\Http\Controllers\LossReasonController;
 use App\Http\Controllers\OperationalReportController;
 use App\Http\Controllers\PaymentFeeController;
+use App\Http\Controllers\PdvIntegrationController;
 use App\Http\Controllers\PreparationAdditionalCostController;
 use App\Http\Controllers\PreparationController;
 use App\Http\Controllers\PreparationEnergyUsageController;
@@ -71,6 +73,14 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/configuracoes/agente/interacoes/{conversation}', [AgentAdministrationController::class, 'interaction'])->middleware('permission:users.manage')->name('agent.interactions.show');
     Route::get('/configuracoes/agente/whatsapp', [WhatsAppConnectionController::class, 'index'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.index');
     Route::post('/configuracoes/agente/whatsapp/verificar', [WhatsAppConnectionController::class, 'check'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.check');
+    Route::get('/configuracoes/integracoes/pdv', [PdvIntegrationController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.index');
+    Route::get('/configuracoes/integracoes/pdv/{connection}/mapeamentos', [PdvIntegrationController::class, 'mappings'])->middleware('permission:pdv.manage')->name('pdv.mappings');
+    Route::put('/configuracoes/integracoes/pdv/{connection}/mapeamentos', [PdvIntegrationController::class, 'updateMapping'])->middleware('permission:pdv.manage')->name('pdv.mappings.update');
+    Route::get('/configuracoes/integracoes/pdv/{connection}/eventos', [PdvIntegrationController::class, 'events'])->middleware('permission:pdv.manage')->name('pdv.events');
+    Route::post('/configuracoes/integracoes/pdv/{connection}/testar', [PdvIntegrationController::class, 'test'])->middleware('permission:pdv.manage')->name('pdv.test');
+    Route::post('/configuracoes/integracoes/pdv/{connection}/sincronizar', [PdvIntegrationController::class, 'sync'])->middleware('permission:pdv.manage')->name('pdv.sync');
+    Route::post('/configuracoes/integracoes/pdv/eventos/{event}/reprocessar', [PdvIntegrationController::class, 'reprocess'])->middleware('permission:pdv.manage')->name('pdv.events.reprocess');
+    Route::get('/configuracoes/agente/uso', AgentUsageReportController::class)->middleware('permission:agent.usage.view')->name('agent.usage');
 
     Route::resource('fornecedores', SupplierController::class)
         ->parameters(['fornecedores' => 'supplier'])
