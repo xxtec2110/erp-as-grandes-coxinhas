@@ -68,7 +68,7 @@ class ErpAgentServiceTest extends TestCase
         $ask = $this->agent()->handle($this->message('multi', 'ESTOQUE', 'stock-1'));
         $this->assertSame('menu', $ask->responseType);
         $this->assertSame('De qual unidade?', $ask->message);
-        $answer = $this->agent()->handle($this->message('multi', 'Catanduva', 'stock-2'));
+        $answer = $this->agent()->handle($this->message('multi', 'Quero consultar na unidade Catanduva.', 'stock-2'));
         $this->assertStringContainsString('Frango: 120', $answer->message);
         $this->assertDatabaseHas('pending_agent_actions', ['user_id' => $user->id, 'status' => 'executed']);
     }

@@ -4,6 +4,7 @@ namespace App\Agent;
 
 use App\Models\AgentAttachment;
 use App\Models\AgentConversation;
+use App\Models\AgentUsageCost;
 use App\Models\Location;
 use App\Models\PendingAgentAction;
 use App\Models\Product;
@@ -170,6 +171,10 @@ class ErpAgentService
         }
         $this->authorization->authorize($user, $tool->permission);
         $input = $this->resolveLocation($input, $user);
+        if (isset($input['location_id'])) {
+            AgentUsageCost::query()->where('idempotency_key', 'ai:'.$message->externalMessageId)
+                ->whereNull('location_id')->update(['location_id' => $input['location_id']]);
+        }
         if ($tool->locationScoped && ! isset($input['location_id'])) {
             $action = $this->pending->prepare($user, $name, $input, ['location_id'], $message->externalMessageId.':location', $conversation->id);
 
@@ -178,7 +183,10 @@ class ErpAgentService
         if ($tool->writesData && $tool->confirmationRequired) {
             $sourceKey = $this->sourceKey($message);
             $input['idempotency_key'] ??= $sourceKey;
-            $aiMissing = $input['_ai_missing_fields'] ?? [];
+            $aiMissing = array_values(array_filter(
+                $input['_ai_missing_fields'] ?? [],
+                fn ($field) => ! isset($input[$field]) || $input[$field] === ''
+            ));
             unset($input['_ai_missing_fields']);
             $missing = array_values(array_unique([...$this->missing($name, $input), ...$aiMissing]));
             $action = $this->pending->prepare($user, $name, $input, $missing, $sourceKey.':action', $conversation->id);
@@ -290,7 +298,12 @@ class ErpAgentService
             return $this->confirmation($action);
         }
         if (in_array('location_id', $action->missing_fields ?? [], true)) {
-            $locations = $this->authorization->accessibleLocations($user)->filter(fn ($location) => str_contains(mb_strtolower($location->name), mb_strtolower($text)));
+            $normalizedText = mb_strtolower(trim($text));
+            $locations = $this->authorization->accessibleLocations($user)->filter(function ($location) use ($normalizedText) {
+                $normalizedName = mb_strtolower(trim($location->name));
+
+                return str_contains($normalizedText, $normalizedName) || str_contains($normalizedName, $normalizedText);
+            });
             if ($locations->count() !== 1) {
                 return ErpAgentResponse::error('Unidade não encontrada ou ambígua. Informe o nome completo.', 'ambiguous_location');
             }
@@ -480,7 +493,12 @@ class ErpAgentService
     {
         $locations = $this->authorization->accessibleLocations($user);
         if (isset($input['location_name'])) {
-            $matches = $locations->filter(fn ($location) => str_contains(mb_strtolower($location->name), mb_strtolower($input['location_name'])));
+            $normalizedName = mb_strtolower(trim((string) $input['location_name']));
+            $matches = $locations->filter(function ($location) use ($normalizedName) {
+                $locationName = mb_strtolower(trim($location->name));
+
+                return str_contains($normalizedName, $locationName) || str_contains($locationName, $normalizedName);
+            });
             if ($matches->count() === 1) {
                 $input['location_id'] = $matches->first()->id;
             } unset($input['location_name']);

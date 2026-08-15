@@ -33,6 +33,12 @@ class AiInterpretationService
         if ($result->tool !== null && ! in_array($result->tool, $availableTools, true)) {
             throw new DomainException('ai_tool_not_allowed');
         }
+        if ($result->tool === 'finance.payables.create' && isset($result->fields['amount']) && ! isset($result->fields['expected_amount'])) {
+            $fields = $result->fields;
+            $fields['expected_amount'] = $fields['amount'];
+            unset($fields['amount']);
+            $result = new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, $result->missingFields, $result->sourceType, $result->documentType, $result->summary, $result->usage);
+        }
         if (count($authorized) === 1) {
             $this->promotePurpose($authorized[0], $result->tool);
             $cacheKey = $this->cacheKey($authorized, $availableTools);

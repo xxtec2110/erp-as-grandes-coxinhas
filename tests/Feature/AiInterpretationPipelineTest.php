@@ -8,6 +8,7 @@ use App\Agent\AiProviderInterface;
 use App\Agent\ErpAgentService;
 use App\Models\AgentAttachment;
 use App\Models\Location;
+use App\Models\PendingAgentAction;
 use App\Models\Permission;
 use App\Models\Supplier;
 use App\Models\User;
@@ -48,6 +49,22 @@ class AiInterpretationPipelineTest extends TestCase
         $this->assertTrue($response->success);
         $this->assertDatabaseCount('pending_agent_actions', 1);
         $this->assertDatabaseCount('payments', 0);
+    }
+
+    public function test_payable_preview_normalizes_legacy_amount_to_expected_amount(): void
+    {
+        $this->identity('payable-text', ['agent.text.use', 'agent.free_chat.use', 'finance.payables.create'], ['free_chat_allowed' => true]);
+        $response = app(ErpAgentService::class)->handle(new AgentMessage('local-test', 'payable-text', 'payable-preview-1', 'Registre a conta.', metadata: ['fake_intent' => [
+            'tool' => 'finance.payables.create',
+            'fields' => ['description' => 'Teste', 'amount' => '10', 'location_id' => $this->location->id, 'competency_date' => '2026-08-15', 'due_date' => '2026-08-15'],
+            'missing_fields' => ['location_id'],
+        ]]));
+
+        $this->assertSame('confirmation', $response->responseType);
+        $this->assertDatabaseHas('pending_agent_actions', ['tool_name' => 'finance.payables.create', 'status' => 'pending']);
+        $this->assertSame('10', (string) PendingAgentAction::query()->firstOrFail()->payload['expected_amount']);
+        $this->assertDatabaseHas('agent_usage_costs', ['location_id' => $this->location->id]);
+        $this->assertDatabaseCount('payables', 0);
     }
 
     public function test_document_creates_purchase_preview_and_never_updates_ingredient_prices(): void

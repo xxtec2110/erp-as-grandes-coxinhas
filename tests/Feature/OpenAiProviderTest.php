@@ -22,7 +22,7 @@ class OpenAiProviderTest extends TestCase
     public function test_interprets_text_with_structured_output_and_usage(): void
     {
         Http::fake(['openai.invalid/*' => Http::response($this->response(['tool' => 'finance.payables.list', 'fields' => ['period' => 'week']]), 200)]);
-        $result = app(OpenAiProvider::class)->interpret(new AgentMessage('local', '1', 'm1', 'Quais contas vencem esta semana?'), ['finance.payables.list']);
+        $result = app(OpenAiProvider::class)->interpret(new AgentMessage('local', '1', 'm1', 'Quais contas vencem esta semana?'), ['finance.payables.list', 'finance.payables.create']);
 
         $this->assertSame('finance.payables.list', $result->tool);
         $this->assertSame(17, $result->usage['input_tokens']);
@@ -30,6 +30,7 @@ class OpenAiProviderTest extends TestCase
         Http::assertSent(fn (Request $request) => $request['model'] === 'text-test'
             && data_get($request->data(), 'text.format.type') === 'json_schema'
             && data_get($request->data(), 'text.format.strict') === false
+            && str_contains($request['instructions'], 'expected_amount')
             && str_contains($request['instructions'], 'Nunca autorize'));
     }
 
