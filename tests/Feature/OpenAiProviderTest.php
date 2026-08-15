@@ -26,6 +26,7 @@ class OpenAiProviderTest extends TestCase
 
         $this->assertSame('finance.payables.list', $result->tool);
         $this->assertSame(17, $result->usage['input_tokens']);
+        $this->assertSame(5, $result->usage['cached_input_tokens']);
         Http::assertSent(fn (Request $request) => $request['model'] === 'text-test'
             && data_get($request->data(), 'text.format.type') === 'json_schema'
             && data_get($request->data(), 'text.format.strict') === false
@@ -101,6 +102,6 @@ class OpenAiProviderTest extends TestCase
     {
         $data = array_replace(['intent' => 'query', 'tool' => null, 'confidence' => 0.95, 'fields' => [], 'missing_fields' => [], 'source_type' => 'text', 'document_type' => 'none', 'summary' => 'Consulta interpretada.'], $overrides);
 
-        return ['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($data)]]]], 'usage' => ['input_tokens' => 17, 'output_tokens' => 9]];
+        return ['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($data)]]]], 'usage' => ['input_tokens' => 17, 'input_tokens_details' => ['cached_tokens' => 5], 'output_tokens' => 9]];
     }
 }

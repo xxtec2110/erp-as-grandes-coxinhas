@@ -11,7 +11,14 @@ class AgentUsageCost extends Model
 
     protected function casts(): array
     {
-        return ['estimated_cost' => 'decimal:6', 'billable' => 'boolean'];
+        return [
+            'estimated_cost' => 'decimal:12',
+            'cost_usd' => 'decimal:12',
+            'fx_rate' => 'decimal:8',
+            'cost_brl' => 'decimal:12',
+            'pricing_date' => 'date',
+            'billable' => 'boolean',
+        ];
     }
 
     public function user(): BelongsTo

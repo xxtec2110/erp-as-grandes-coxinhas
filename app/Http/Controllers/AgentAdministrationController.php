@@ -6,6 +6,7 @@ use App\Http\Requests\ExternalIdentityRequest;
 use App\Http\Requests\StoreExternalIdentityRequest;
 use App\Models\AgentConversation;
 use App\Models\AgentEvent;
+use App\Models\AgentUsageCost;
 use App\Models\PendingAgentAction;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
@@ -112,12 +113,12 @@ class AgentAdministrationController extends Controller
             ? 'simulação local'
             : ($provider === 'openai' && config('ai.openai.enabled') && filled(config('ai.openai.api_key')) && $model !== '' ? 'configurado' : 'não configurado');
 
-        return view('agent.observability.index', ['metrics' => $metrics, 'providerConfig' => ['provider' => $provider, 'model' => $model, 'status' => $providerStatus], 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
+        return view('agent.observability.index', ['metrics' => $metrics, 'providerConfig' => ['provider' => $provider, 'model' => $model, 'status' => $providerStatus], 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'usageCosts' => AgentUsageCost::query()->with(['user'])->latest()->limit(30)->get(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
     }
 
     public function updateCosts(Request $request, AgentCostService $costs): RedirectResponse
     {
-        $data = $request->validate(['monthly_budget' => 'required|decimal:0,6|min:0', 'warning_threshold' => 'required|decimal:0,6|min:0', 'saving_threshold' => 'required|decimal:0,6|min:0', 'critical_threshold' => 'required|decimal:0,6|min:0', 'monthly_host_cost' => 'required|decimal:0,6|min:0', 'automatic_saving_mode' => 'nullable|boolean']);
+        $data = $request->validate(['monthly_budget' => 'required|decimal:0,6|min:0', 'warning_threshold' => 'required|decimal:0,6|min:0', 'saving_threshold' => 'required|decimal:0,6|min:0', 'critical_threshold' => 'required|decimal:0,6|min:0', 'monthly_host_cost' => 'required|decimal:0,6|min:0', 'usd_brl_rate' => 'nullable|decimal:0,8|gt:0', 'automatic_saving_mode' => 'nullable|boolean']);
         $warning = BigDecimal::of($data['warning_threshold']);
         $saving = BigDecimal::of($data['saving_threshold']);
         $critical = BigDecimal::of($data['critical_threshold']);

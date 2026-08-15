@@ -61,7 +61,12 @@ class OpenAiProvider implements AiProviderInterface
             }
 
             try {
-                return AiInterpretation::fromArray($decoded, ['model' => $model, 'input_tokens' => data_get($response->json(), 'usage.input_tokens'), 'output_tokens' => data_get($response->json(), 'usage.output_tokens')]);
+                return AiInterpretation::fromArray($decoded, [
+                    'model' => $model,
+                    'input_tokens' => data_get($response->json(), 'usage.input_tokens'),
+                    'cached_input_tokens' => data_get($response->json(), 'usage.input_tokens_details.cached_tokens'),
+                    'output_tokens' => data_get($response->json(), 'usage.output_tokens'),
+                ]);
             } catch (DomainException $exception) {
                 throw new AiProviderResponseException('ai_provider_invalid_schema', previous: $exception);
             }

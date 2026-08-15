@@ -6,9 +6,9 @@ use App\Agent\AgentMessage;
 use App\Agent\AiProviderInterface;
 use App\Agent\AudioTranscriptionProviderInterface;
 use App\Agent\ErpAgentService;
-use App\Models\AgentUsageCost;
 use App\Models\UserExternalIdentity;
 use App\Services\AgentAttachmentService;
+use App\Services\AgentCostService;
 use App\Services\AgentMediaService;
 use App\Services\AuthorizationService;
 use Brick\Math\BigDecimal;
@@ -69,12 +69,14 @@ class AgentSimulatorController extends Controller
 
     private function liveAvailable(Request $request): bool
     {
-        $spent = (string) AgentUsageCost::query()->where('provider', 'openai')->where('created_at', '>=', now()->startOfMonth())->sum('estimated_cost');
+        $costs = app(AgentCostService::class);
+        $spent = $costs->monthlyOpenAiSpendBrl();
         $budget = BigDecimal::of((string) config('ai.live_test.budget_brl', '0'));
+        $model = (string) config('ai.models.text');
 
         return app()->environment('local') && (bool) $request->user()?->is_super_admin
             && (bool) config('ai.live_test.enabled') && (bool) config('ai.openai.enabled')
-            && filled(config('ai.openai.api_key')) && filled(config('ai.models.text'))
+            && filled(config('ai.openai.api_key')) && $model !== '' && $costs->openAiPricingReady($model)
             && $budget->isPositive() && BigDecimal::of($spent)->isLessThan($budget);
     }
 }
