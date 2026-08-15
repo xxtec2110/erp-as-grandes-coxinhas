@@ -71,12 +71,13 @@ class WhatsAppChannelTest extends TestCase
     public function test_unknown_pending_and_blocked_identities_never_execute_tools(): void
     {
         $this->send('wamid.unknown', '551100000002', 'ESTOQUE');
-        $this->assertDatabaseHas('user_external_identities', ['channel' => 'whatsapp', 'external_user_id' => '551100000002', 'status' => 'pending', 'active' => false]);
-        $this->assertStringContainsString('não identificado', $this->client->sent()[0]['text']);
-
-        $pending = UserExternalIdentity::query()->where('external_user_id', '551100000002')->firstOrFail();
-        $this->send('wamid.pending', '551100000002', 'ESTOQUE');
-        $this->assertSame('pending', $pending->fresh()->status);
+        $this->assertDatabaseCount('user_external_identities', 0);
+        $this->assertDatabaseCount('whatsapp_inbound_messages', 0);
+        $this->assertDatabaseCount('agent_conversations', 0);
+        $this->assertDatabaseCount('pending_agent_actions', 0);
+        $this->assertDatabaseCount('agent_usage_costs', 0);
+        $this->assertCount(0, $this->client->sent());
+        $this->assertDatabaseHas('agent_events', ['event_type' => 'whatsapp_inbound_blocked', 'error_code' => 'unknown_identity']);
 
         $user = User::factory()->unprivileged()->create();
         UserExternalIdentity::query()->create(['user_id' => $user->id, 'channel' => 'whatsapp', 'external_user_id' => '551100000003', 'status' => 'blocked', 'active' => false]);
@@ -102,7 +103,7 @@ class WhatsAppChannelTest extends TestCase
     public function test_write_confirmation_sim_no_and_idempotency_use_existing_agent_core(): void
     {
         $location = Location::query()->create(['name' => 'Fábrica Ibirá', 'type' => 'production', 'active' => true]);
-        $this->known('551100000005', ['production.create'], [$location]);
+        $this->known('551100000005', ['production.create', 'agent.write.use'], [$location]);
         Product::query()->create(['name' => 'Frango com Catupiry', 'stock_unit' => 'un', 'active' => true]);
 
         $this->send('wamid.production.preview', '551100000005', 'PRODUZIMOS 100 FRANGO COM CATUPIRY');
@@ -212,7 +213,7 @@ class WhatsAppChannelTest extends TestCase
     public function test_retry_after_confirmed_production_does_not_duplicate_the_operation(): void
     {
         $location = Location::query()->create(['name' => 'Fábrica Retry', 'type' => 'production', 'active' => true]);
-        $this->known('551100000010', ['production.create'], [$location]);
+        $this->known('551100000010', ['production.create', 'agent.write.use'], [$location]);
         Product::query()->create(['name' => 'Coxinha Retry', 'stock_unit' => 'un', 'active' => true]);
         $this->send('wamid.retry.preview', '551100000010', 'PRODUZIMOS 10 COXINHA RETRY');
         $payload = $this->payload('wamid.retry.confirm', '551100000010', 'SIM');

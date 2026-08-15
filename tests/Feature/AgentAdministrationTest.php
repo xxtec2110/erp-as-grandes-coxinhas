@@ -9,7 +9,6 @@ use App\Models\Location;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
-use App\Models\UserExternalIdentity;
 use Database\Seeders\AuthorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -25,51 +24,38 @@ class AgentAdministrationTest extends TestCase
         $this->seed(AuthorizationSeeder::class);
     }
 
-    public function test_administrator_can_approve_and_link_identity_using_existing_access_rules(): void
+    public function test_administrator_can_authorize_phone_without_changing_existing_access_rules(): void
     {
         $admin = User::factory()->create(['is_super_admin' => true]);
         $operator = User::factory()->create();
         $location = Location::query()->create(['name' => 'Loja Ibirá', 'type' => 'store', 'active' => true]);
         $role = Role::query()->where('name', 'operator')->firstOrFail();
         $permission = Permission::query()->where('name', 'stock.view')->firstOrFail();
-        $identity = UserExternalIdentity::query()->create([
-            'channel' => 'simulator',
-            'external_user_id' => 'pending-1',
-            'status' => 'pending',
-            'active' => false,
-        ]);
+        $operator->roles()->sync([$role->id]);
+        $operator->locations()->sync([$location->id]);
+        $operator->permissions()->syncWithoutDetaching([$permission->id => ['allowed' => true]]);
 
-        $response = $this->actingAs($admin)->put(route('agent.identities.update', $identity), [
-            'display_name' => 'Operador externo',
+        $response = $this->actingAs($admin)->post(route('agent.identities.store'), [
             'user_id' => $operator->id,
-            'status' => 'approved',
-            'active' => '1',
-            'menu_enabled' => '1',
-            'structured_commands_allowed' => '1',
-            'role_ids' => [$role->id],
-            'location_ids' => [$location->id],
-            'permission_overrides' => [$permission->id => 'allow'],
+            'phone' => '(17) 99999-9999',
+            'confirm_authorization' => '1',
         ]);
 
         $response->assertRedirect();
-        $this->assertDatabaseHas('user_external_identities', ['id' => $identity->id, 'user_id' => $operator->id, 'status' => 'approved', 'active' => true]);
+        $this->assertDatabaseHas('user_external_identities', ['user_id' => $operator->id, 'phone_normalized' => '+5517999999999', 'status' => 'approved', 'active' => true]);
         $this->assertTrue($operator->fresh()->roles->contains($role));
         $this->assertTrue($operator->fresh()->locations->contains($location));
-        $this->assertDatabaseHas('authorization_audits', ['actor_user_id' => $admin->id, 'target_user_id' => $operator->id, 'source' => 'agent_identity_admin']);
-        $this->assertDatabaseHas('agent_events', ['event_type' => 'identity_approved', 'user_external_identity_id' => $identity->id]);
+        $this->assertDatabaseHas('agent_events', ['event_type' => 'identity_activated']);
     }
 
-    public function test_approved_identity_requires_linked_erp_user(): void
+    public function test_authorization_requires_existing_user(): void
     {
         $admin = User::factory()->create(['is_super_admin' => true]);
-        $identity = UserExternalIdentity::query()->create(['channel' => 'simulator', 'external_user_id' => 'pending-2', 'status' => 'pending', 'active' => false]);
+        $this->actingAs($admin)->from(route('agent.identities.create'))->post(route('agent.identities.store'), [
+            'user_id' => 999999, 'phone' => '(17) 99999-9999',
+        ])->assertRedirect(route('agent.identities.create'))->assertSessionHasErrors('user_id');
 
-        $this->actingAs($admin)->from(route('agent.identities.edit', $identity))->put(route('agent.identities.update', $identity), [
-            'status' => 'approved',
-            'active' => '1',
-        ])->assertRedirect(route('agent.identities.edit', $identity))->assertSessionHasErrors('user_id');
-
-        $this->assertDatabaseHas('user_external_identities', ['id' => $identity->id, 'status' => 'pending']);
+        $this->assertDatabaseCount('user_external_identities', 0);
     }
 
     public function test_agent_administration_is_protected_and_available_to_authorized_user(): void

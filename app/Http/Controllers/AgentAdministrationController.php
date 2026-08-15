@@ -3,18 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ExternalIdentityRequest;
+use App\Http\Requests\StoreExternalIdentityRequest;
 use App\Models\AgentConversation;
 use App\Models\AgentEvent;
-use App\Models\Location;
 use App\Models\PendingAgentAction;
-use App\Models\Permission;
-use App\Models\Role;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Models\WhatsAppInboundMessage;
 use App\Services\AgentCostService;
 use App\Services\AuthorizationService;
 use App\Services\ExternalIdentityService;
+use App\Services\PhoneNumberNormalizer;
 use Brick\Math\BigDecimal;
 use DomainException;
 use Illuminate\Http\RedirectResponse;
@@ -24,16 +23,55 @@ use Illuminate\View\View;
 
 class AgentAdministrationController extends Controller
 {
-    public function identities(): View
+    public function identities(PhoneNumberNormalizer $phones): View
     {
-        return view('agent.identities.index', ['identities' => UserExternalIdentity::query()->with(['user.roles', 'user.locations'])->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")->latest()->paginate(25)]);
+        return view('agent.identities.index', ['identities' => UserExternalIdentity::query()->with(['user.roles', 'user.locations'])->where('channel', 'whatsapp')->latest()->paginate(25), 'phones' => $phones, 'blockedCount' => AgentEvent::query()->where('event_type', 'whatsapp_inbound_blocked')->count()]);
+    }
+
+    public function createIdentity(): View
+    {
+        return view('agent.identities.create', ['users' => User::query()->where('active', true)->with(['roles', 'locations'])->orderBy('name')->get()]);
+    }
+
+    public function storeIdentity(StoreExternalIdentityRequest $request, ExternalIdentityService $service): RedirectResponse
+    {
+        try {
+            $identity = $service->create($request->validated(), $request->user());
+        } catch (DomainException $e) {
+            throw ValidationException::withMessages(['phone' => $e->getMessage()]);
+        }
+
+        return redirect()->route('agent.identities.edit', $identity)->with('success', 'Acesso WhatsApp ativado.');
     }
 
     public function editIdentity(UserExternalIdentity $identity, AuthorizationService $authorization): View
     {
-        $identity->load(['user.roles', 'user.permissions', 'user.locations']);
+        $identity->load(['user.roles', 'user.permissions', 'user.locations', 'approver']);
 
-        return view('agent.identities.edit', ['identity' => $identity, 'users' => User::query()->orderBy('name')->get(), 'roles' => Role::query()->orderBy('label')->get(), 'permissions' => Permission::query()->orderBy('group')->orderBy('label')->get(), 'locations' => Location::query()->orderBy('name')->get(), 'effective' => $identity->user ? $authorization->effectivePermissions($identity->user) : []]);
+        return view('agent.identities.edit', ['identity' => $identity, 'effective' => $identity->user ? $authorization->effectivePermissions($identity->user) : []]);
+    }
+
+    public function replaceIdentityPhone(Request $request, UserExternalIdentity $identity, ExternalIdentityService $service): RedirectResponse
+    {
+        $data = $request->validate(['phone' => ['required', 'string', 'max:30'], 'confirm_replace' => ['accepted']]);
+        try {
+            $replacement = $service->replacePhone($identity, $data['phone'], $request->user());
+        } catch (DomainException $e) {
+            throw ValidationException::withMessages(['phone' => $e->getMessage()]);
+        }
+
+        return redirect()->route('agent.identities.edit', $replacement)->with('success', 'Número anterior desativado e novo acesso ativado.');
+    }
+
+    public function welcomeIdentity(UserExternalIdentity $identity, ExternalIdentityService $service, Request $request): RedirectResponse
+    {
+        try {
+            $service->requestWelcome($identity, $request->user());
+        } catch (DomainException $e) {
+            throw ValidationException::withMessages(['welcome' => $e->getMessage()]);
+        }
+
+        return back()->with('success', 'Boas-vindas solicitadas com segurança.');
     }
 
     public function updateIdentity(ExternalIdentityRequest $request, UserExternalIdentity $identity, ExternalIdentityService $service): RedirectResponse
@@ -65,6 +103,7 @@ class AgentAdministrationController extends Controller
             'whatsapp_sent' => $count('whatsapp_response_sent'),
             'whatsapp_failures' => $count('whatsapp_send_error'),
             'whatsapp_statuses' => $count('whatsapp_status_received'),
+            'whatsapp_blocked' => $count('whatsapp_inbound_blocked'),
         ];
 
         $provider = (string) config('ai.provider', 'disabled');

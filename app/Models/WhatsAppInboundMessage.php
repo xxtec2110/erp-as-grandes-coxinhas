@@ -26,4 +26,9 @@ class WhatsAppInboundMessage extends Model
     {
         return $this->hasMany(AgentAttachment::class);
     }
+
+    public function identity(): BelongsTo
+    {
+        return $this->belongsTo(UserExternalIdentity::class, 'user_external_identity_id');
+    }
 }

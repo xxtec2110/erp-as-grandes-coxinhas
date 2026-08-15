@@ -17,28 +17,28 @@ use App\Services\AiInterpretationService;
 use App\Services\AuthorizationService;
 use App\Services\RestrictedProductionInteractionService;
 use App\Services\UndoLastOperationService;
+use App\Services\WhatsAppIdentityResolver;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
-        $identity = UserExternalIdentity::query()->with('user')->where('channel', $message->channel)->where('external_user_id', $message->externalUserId)->first();
-        if ($identity === null) {
-            $identity = UserExternalIdentity::query()->create(['channel' => $message->channel, 'external_user_id' => $message->externalUserId, 'display_name' => $message->metadata['display_name'] ?? null, 'status' => 'pending', 'active' => false, 'metadata' => ['first_message_type' => $message->messageType], 'last_contact_at' => now()]);
-            $this->events->record('unauthorized_identity', $message->channel, messageId: $message->externalMessageId, identityId: $identity->id, status: 'pending', errorCode: 'unknown_identity');
+        $resolution = $message->channel === 'whatsapp' ? $this->identityResolver->resolve($message->externalUserId) : null;
+        $identity = $resolution?->identity ?? UserExternalIdentity::query()->with('user')->where('channel', $message->channel)->where('external_user_id', $message->externalUserId)->first();
+        if ($message->channel !== 'whatsapp' && $identity === null) {
+            UserExternalIdentity::query()->create(['channel' => $message->channel, 'external_user_id' => $message->externalUserId, 'display_name' => $message->metadata['display_name'] ?? null, 'status' => 'pending', 'active' => false, 'metadata' => ['first_message_type' => $message->messageType], 'last_contact_at' => now()]);
 
-            return ErpAgentResponse::error('Usuário não identificado. Solicite autorização ao administrador.', 'unknown_identity', 'unauthorized');
+            return ErpAgentResponse::error('Usuário não identificado.', 'unknown_identity', 'unauthorized');
         }
-        if (! $identity->active || $identity->status !== 'approved' || $identity->user === null) {
-            $identity->update(['last_contact_at' => now()]);
-            $this->events->record('unauthorized_identity', $message->channel, messageId: $message->externalMessageId, identityId: $identity->id, status: $identity->status, errorCode: 'identity_not_approved');
+        if ($identity === null || ($resolution !== null && ! $resolution->authorized()) || ! $identity->active || $identity->status !== 'approved' || $identity->user === null || ! $identity->user->active) {
+            $code = $resolution?->status === 'invalid_identifier' ? 'unknown_identity' : ($resolution?->status ?? 'unknown_identity');
 
-            return ErpAgentResponse::error('Seu acesso ainda não está aprovado ou está bloqueado.', 'identity_not_approved', 'unauthorized');
+            return ErpAgentResponse::error('Acesso não autorizado.', $code, 'unauthorized');
         }
         if (($restrictedResponse = $this->restrictedProduction->guard($message, $identity)) !== null) {
             return $restrictedResponse;
@@ -165,6 +165,9 @@ class ErpAgentService
     private function runTool(string $name, array $input, User $user, AgentConversation $conversation, AgentMessage $message): ErpAgentResponse
     {
         $tool = $this->registry->get($name) ?? throw new DomainException('Comando não disponível.');
+        if ($message->channel === 'whatsapp' && $tool->writesData && ! $this->authorization->allows($user, 'agent.write.use')) {
+            throw new AuthorizationException('Operações de escrita não estão liberadas neste canal.');
+        }
         $this->authorization->authorize($user, $tool->permission);
         $input = $this->resolveLocation($input, $user);
         if ($tool->locationScoped && ! isset($input['location_id'])) {
@@ -406,7 +409,13 @@ class ErpAgentService
             }
         }
 
-        return new ErpAgentResponse(true, 'Olá, '.$user->name."! 👋\n\nO que você deseja fazer?", 'menu', options: $options);
+        $greeting = match (true) {
+            now()->hour < 12 => 'Bom dia',
+            now()->hour < 18 => 'Boa tarde',
+            default => 'Boa noite',
+        };
+
+        return new ErpAgentResponse(true, $greeting.', '.$user->name."! 👋\n\nO que você deseja fazer?", 'menu', options: $options);
     }
 
     private function submenu(string $name, User $user, AgentMessage $message, AgentConversation $conversation): ErpAgentResponse

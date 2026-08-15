@@ -53,19 +53,20 @@ class MetaWhatsAppAndCostControlTest extends TestCase
         $this->assertSame('media_processing_unavailable', $allowed->errorCode);
     }
 
-    public function test_administrator_can_enable_and_revoke_audio_through_existing_identity_access_screen(): void
+    public function test_administrator_can_enable_and_revoke_channel_audio_without_copying_permissions(): void
     {
         $admin = User::factory()->create(['is_super_admin' => true]);
         [$user,$identity] = $this->identity('managed-audio');
         $audio = Permission::query()->where('name', 'agent.audio.use')->firstOrFail();
-        $base = ['display_name' => 'Usuário', 'user_id' => $user->id, 'status' => 'approved', 'active' => '1', 'menu_enabled' => '1', 'structured_commands_allowed' => '1', 'voice_allowed' => '1', 'permission_overrides' => [$audio->id => 'allow']];
+        $user->permissions()->attach($audio, ['allowed' => true]);
+        $base = ['status' => 'approved', 'active' => '1', 'menu_enabled' => '1', 'structured_commands_allowed' => '1', 'voice_allowed' => '1'];
         $this->actingAs($admin)->put(route('agent.identities.update', $identity), $base)->assertRedirect();
         $this->assertTrue($identity->fresh()->voice_allowed);
         $this->assertTrue((bool) $user->fresh()->permissions()->whereKey($audio->id)->first()->pivot->allowed);
         $base['voice_allowed'] = '0';
-        $base['permission_overrides'] = [$audio->id => 'deny'];
         $this->actingAs($admin)->put(route('agent.identities.update', $identity), $base)->assertRedirect();
         $this->assertFalse($identity->fresh()->voice_allowed);
+        $this->assertTrue((bool) $user->fresh()->permissions()->whereKey($audio->id)->first()->pivot->allowed);
     }
 
     public function test_cost_thresholds_and_saving_mode_are_configurable_without_stopping_deterministic_erp(): void

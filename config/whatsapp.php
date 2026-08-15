@@ -17,5 +17,8 @@ return [
     'media_download_enabled' => (bool) env('WHATSAPP_MEDIA_DOWNLOAD_ENABLED', false),
     'media_max_attempts' => (int) env('WHATSAPP_MEDIA_MAX_ATTEMPTS', 2),
     'media_timeout' => (int) env('WHATSAPP_MEDIA_TIMEOUT', 20),
+    'default_country_code' => env('WHATSAPP_DEFAULT_COUNTRY_CODE', '55'),
+    'unknown_contact_auto_reply' => (bool) env('WHATSAPP_UNKNOWN_CONTACT_AUTO_REPLY', false),
+    'identity_rate_limit_per_minute' => (int) env('WHATSAPP_IDENTITY_RATE_LIMIT_PER_MINUTE', 30),
     'media_allowed_hosts' => ['lookaside.fbsbx.com', 'scontent.whatsapp.net', 'graph.facebook.com'],
 ];

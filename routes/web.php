@@ -65,9 +65,13 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
     Route::get('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'index'])->middleware('permission:users.manage')->name('agent.simulator');
     Route::post('/configuracoes/simulador-agente', [AgentSimulatorController::class, 'send'])->middleware('permission:users.manage')->name('agent.simulator.send');
-    Route::get('/configuracoes/agente/identidades', [AgentAdministrationController::class, 'identities'])->middleware('permission:users.manage')->name('agent.identities.index');
-    Route::get('/configuracoes/agente/identidades/{identity}/editar', [AgentAdministrationController::class, 'editIdentity'])->middleware('permission:users.manage')->name('agent.identities.edit');
-    Route::put('/configuracoes/agente/identidades/{identity}', [AgentAdministrationController::class, 'updateIdentity'])->middleware('permission:users.manage')->name('agent.identities.update');
+    Route::get('/configuracoes/agente/identidades', [AgentAdministrationController::class, 'identities'])->middleware('permission:whatsapp.identities.view')->name('agent.identities.index');
+    Route::get('/configuracoes/agente/identidades/criar', [AgentAdministrationController::class, 'createIdentity'])->middleware('permission:whatsapp.identities.manage')->name('agent.identities.create');
+    Route::post('/configuracoes/agente/identidades', [AgentAdministrationController::class, 'storeIdentity'])->middleware('permission:whatsapp.identities.manage')->name('agent.identities.store');
+    Route::get('/configuracoes/agente/identidades/{identity}/editar', [AgentAdministrationController::class, 'editIdentity'])->middleware('permission:whatsapp.identities.view')->name('agent.identities.edit');
+    Route::put('/configuracoes/agente/identidades/{identity}', [AgentAdministrationController::class, 'updateIdentity'])->middleware('permission:whatsapp.identities.manage')->name('agent.identities.update');
+    Route::put('/configuracoes/agente/identidades/{identity}/telefone', [AgentAdministrationController::class, 'replaceIdentityPhone'])->middleware('permission:whatsapp.identities.manage')->name('agent.identities.phone');
+    Route::post('/configuracoes/agente/identidades/{identity}/boas-vindas', [AgentAdministrationController::class, 'welcomeIdentity'])->middleware('permission:whatsapp.identities.manage')->name('agent.identities.welcome');
     Route::get('/configuracoes/agente/observabilidade', [AgentAdministrationController::class, 'observability'])->middleware('permission:users.manage')->name('agent.observability');
     Route::put('/configuracoes/agente/custos', [AgentAdministrationController::class, 'updateCosts'])->middleware('permission:users.manage')->name('agent.costs.update');
     Route::get('/configuracoes/agente/interacoes/{conversation}', [AgentAdministrationController::class, 'interaction'])->middleware('permission:users.manage')->name('agent.interactions.show');

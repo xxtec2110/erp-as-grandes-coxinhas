@@ -37,7 +37,9 @@
                                 @endif
                                 @if ($authorization->allows(auth()->user(), 'users.manage'))
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('users.index') }}">Usuários e acessos</a>
-                                    <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.identities.index') }}">Identidades externas</a>
+                                    @if ($authorization->allows(auth()->user(), 'whatsapp.identities.view'))
+                                        <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.identities.index') }}">Acesso WhatsApp</a>
+                                    @endif
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.observability') }}">Observabilidade do Agente</a>
                                     @if ($authorization->allows(auth()->user(), 'agent.whatsapp.manage_connection'))
                                         <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.whatsapp.index') }}">WhatsApp do Agente</a>

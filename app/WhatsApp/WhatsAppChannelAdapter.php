@@ -7,11 +7,14 @@ use App\Agent\ErpAgentService;
 use App\Models\AgentConversationMessage;
 use App\Models\WhatsAppInboundMessage;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\AgentAccessPolicy;
 use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AgentMediaService;
 use App\Services\WhatsAppConnectionService;
+use App\Services\WhatsAppIdentityResolver;
 use DomainException;
+use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 class WhatsAppChannelAdapter
@@ -26,6 +29,8 @@ class WhatsAppChannelAdapter
         private AgentCostService $costs,
         private WhatsAppFailureClassifier $failures,
         private AgentMediaService $media,
+        private WhatsAppIdentityResolver $identities,
+        private AgentAccessPolicy $access,
     ) {}
 
     public function handle(array $payload, int $attempt = 1, bool $finalAttempt = false, int $retryDelay = 5): void
@@ -57,6 +62,29 @@ class WhatsAppChannelAdapter
             }
 
             $message = $item['message'];
+            $resolution = $this->identities->resolve($message->externalUserId);
+            if (! $resolution->authorized()) {
+                $this->events->record('whatsapp_inbound_blocked', 'whatsapp', messageId: $message->externalMessageId, status: 'blocked', errorCode: $resolution->status, metadata: ['identifier_hash' => hash('sha256', (string) ($resolution->normalized ?? $message->externalUserId)), 'ai_used' => false, 'media_downloaded' => false]);
+                $event->update(['status' => 'processed', 'error_code' => $resolution->status]);
+
+                continue;
+            }
+            $identity = $resolution->identity;
+            $rateKey = 'whatsapp-agent:'.$identity->id;
+            if (RateLimiter::tooManyAttempts($rateKey, (int) config('whatsapp.identity_rate_limit_per_minute', 30))) {
+                $this->events->record('whatsapp_inbound_blocked', 'whatsapp', $identity->user, messageId: $message->externalMessageId, identityId: $identity->id, status: 'blocked', errorCode: 'rate_limited', metadata: ['ai_used' => false, 'media_downloaded' => false]);
+                $event->update(['status' => 'processed', 'error_code' => 'rate_limited']);
+
+                continue;
+            }
+            RateLimiter::hit($rateKey, 60);
+            if (! $this->access->canUse($identity, $message->messageType)) {
+                $this->events->record('channel_permission_denied', 'whatsapp', $identity->user, messageId: $message->externalMessageId, identityId: $identity->id, status: 'denied', errorCode: 'channel_not_allowed', metadata: ['media_downloaded' => false, 'ai_used' => false]);
+                $this->outbound->sendText($message->externalUserId, 'Este tipo de mensagem não está liberado para o seu usuário.', $event);
+                $event->update(['status' => 'processed', 'error_code' => 'channel_not_allowed']);
+
+                continue;
+            }
             $this->costs->record('meta', 'meta_inbound', 'meta-inbound:'.$message->externalMessageId);
             $inbound = WhatsAppInboundMessage::query()->firstOrCreate([
                 'provider' => (string) ($message->metadata['provider'] ?? config('whatsapp.provider')),
@@ -64,6 +92,8 @@ class WhatsAppChannelAdapter
                 'external_message_id' => $message->externalMessageId,
             ], [
                 'external_user_id' => $message->externalUserId,
+                'user_external_identity_id' => $identity->id,
+                'provenance' => 'authorized_user_inbound',
                 'message_type' => $message->messageType,
                 'original_timestamp' => $message->receivedAt,
                 'received_at' => now(),
@@ -77,6 +107,7 @@ class WhatsAppChannelAdapter
             }
             try {
                 $inbound->update(['status' => 'processing', 'attempts' => max($inbound->attempts + 1, $attempt), 'next_retry_at' => null]);
+                $identity->update(['last_contact_at' => now(), 'last_authorized_inbound_at' => now()]);
                 $event->update(['status' => 'processing', 'error_code' => null]);
                 try {
                     $message = $this->media->prepare($message, $inbound);

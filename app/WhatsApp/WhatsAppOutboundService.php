@@ -12,7 +12,7 @@ class WhatsAppOutboundService
 {
     public function __construct(private WhatsAppClientInterface $client, private AgentEventService $events, private AgentCostService $costs) {}
 
-    public function sendText(string $recipient, string $text, WhatsAppWebhookEvent $event): WhatsAppOutboundMessage
+    public function sendText(string $recipient, string $text, WhatsAppWebhookEvent $event, string $provenance = 'system_agent_outbound'): WhatsAppOutboundMessage
     {
         $outbound = WhatsAppOutboundMessage::query()->firstOrCreate([
             'whatsapp_webhook_event_id' => $event->id,
@@ -20,6 +20,7 @@ class WhatsAppOutboundService
             'recipient' => $recipient,
             'message_type' => 'text',
             'body' => $text,
+            'provenance' => $provenance,
         ]);
         if (in_array($outbound->status, ['sent', 'delivered', 'read'], true)) {
             return $outbound;
@@ -30,7 +31,9 @@ class WhatsAppOutboundService
             $providerId = $this->client->sendText($recipient, $text);
             $outbound->update(['provider_message_id' => $providerId, 'status' => 'sent', 'sent_at' => now(), 'error_code' => null]);
             $this->events->record('whatsapp_response_sent', 'whatsapp', status: 'sent', metadata: ['outbound_message_id' => $outbound->id, 'attempt' => $attempt]);
-            $this->costs->record('meta', 'meta_outbound', 'meta-outbound:'.$providerId);
+            if ($provenance !== 'human_manual_outbound') {
+                $this->costs->record('meta', 'meta_outbound', 'meta-outbound:'.$providerId);
+            }
 
             return $outbound->refresh();
         } catch (Throwable $exception) {

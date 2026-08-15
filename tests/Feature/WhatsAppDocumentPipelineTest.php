@@ -46,7 +46,7 @@ class WhatsAppDocumentPipelineTest extends TestCase
         $this->location = Location::query()->create(['name' => 'Catanduva', 'type' => 'store', 'active' => true]);
         $this->supplier = Supplier::query()->create(['name' => 'Fornecedor Fiscal', 'document_type' => 'cnpj', 'document_number' => '11222333000181', 'active' => true]);
         $this->user = User::factory()->unprivileged()->create();
-        foreach (['agent.document.use', 'agent.text.use', 'finance.payables.create', 'finance.payments.create', 'purchases.create'] as $permission) {
+        foreach (['agent.document.use', 'agent.text.use', 'agent.write.use', 'finance.payables.create', 'finance.payments.create', 'purchases.create'] as $permission) {
             $this->user->permissions()->attach(Permission::query()->where('name', $permission)->firstOrFail(), ['allowed' => true]);
         }
         $this->user->locations()->attach($this->location);
