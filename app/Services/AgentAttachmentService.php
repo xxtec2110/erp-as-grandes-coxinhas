@@ -45,6 +45,9 @@ class AgentAttachmentService
             if ($existing->created_by !== $user->id || $existing->location_id !== $locationId) {
                 throw new DomainException('Este conteúdo já existe em outro contexto protegido.');
             }
+            if ($existing->path === null || $existing->processing_status === 'deleted') {
+                throw new DomainException('Esta foto já foi descartada. Envie uma nova foto completa.');
+            }
 
             return $existing;
         }

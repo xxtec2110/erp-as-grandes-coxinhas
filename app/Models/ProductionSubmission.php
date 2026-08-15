@@ -18,4 +18,14 @@ class ProductionSubmission extends Model
     {
         return $this->belongsTo(ProductionUserPolicy::class, 'production_user_policy_id');
     }
+
+    public function pendingAction(): BelongsTo
+    {
+        return $this->belongsTo(PendingAgentAction::class, 'pending_agent_action_id');
+    }
+
+    public function attachment(): BelongsTo
+    {
+        return $this->belongsTo(AgentAttachment::class, 'agent_attachment_id');
+    }
 }

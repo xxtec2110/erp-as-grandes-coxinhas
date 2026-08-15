@@ -10,11 +10,16 @@ use Carbon\CarbonImmutable;
 
 class ProductionNotificationService
 {
-    public function __construct(private WhatsAppClientInterface $client, private DailyProductionBriefService $briefs, private AgentEventService $events) {}
+    public function __construct(
+        private WhatsAppClientInterface $client,
+        private DailyProductionBriefService $briefs,
+        private ProductionSubmissionService $submissions,
+        private AgentEventService $events,
+    ) {}
 
     public function sendBrief(ProductionUserPolicy $policy, CarbonImmutable $date): ProductionSubmission
     {
-        $submission = ProductionSubmission::query()->firstOrCreate(['production_user_policy_id' => $policy->id, 'operation_date' => $date->toDateString()], ['status' => 'awaiting_photo', 'idempotency_key' => "production:{$policy->id}:{$date->toDateString()}"]);
+        $submission = ProductionSubmission::query()->firstOrCreate(['production_user_policy_id' => $policy->id, 'operation_date' => $date->startOfDay()], ['status' => 'awaiting_photo', 'idempotency_key' => "production:{$policy->id}:{$date->toDateString()}"]);
         if ($submission->briefing_sent) {
             return $submission;
         }$recipient = $policy->user->externalIdentities()->where('channel', 'whatsapp')->where('active', true)->value('external_user_id');
@@ -29,7 +34,7 @@ class ProductionNotificationService
 
     public function sendMissingAlert(ProductionUserPolicy $policy, CarbonImmutable $date): ProductionSubmission
     {
-        $submission = ProductionSubmission::query()->firstOrCreate(['production_user_policy_id' => $policy->id, 'operation_date' => $date->toDateString()], ['status' => 'not_submitted', 'idempotency_key' => "production:{$policy->id}:{$date->toDateString()}"]);
+        $submission = ProductionSubmission::query()->firstOrCreate(['production_user_policy_id' => $policy->id, 'operation_date' => $date->startOfDay()], ['status' => 'awaiting_photo', 'idempotency_key' => "production:{$policy->id}:{$date->toDateString()}"]);
         if ($submission->alert_sent || $submission->status === 'confirmed') {
             return $submission;
         }$admin = User::query()->where('is_super_admin', true)->first();
@@ -42,5 +47,10 @@ class ProductionNotificationService
         $this->events->record('production_missing_alert_sent', 'whatsapp', $admin, metadata: ['policy_id' => $policy->id, 'operation_date' => $date->toDateString()]);
 
         return $submission->refresh();
+    }
+
+    public function markNotSubmitted(ProductionUserPolicy $policy, CarbonImmutable $date): ProductionSubmission
+    {
+        return $this->submissions->markNotSubmitted($policy, $date);
     }
 }

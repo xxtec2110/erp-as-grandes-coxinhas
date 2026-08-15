@@ -64,4 +64,9 @@ class Product extends Model
     {
         return $this->hasOne(ProductRecipe::class);
     }
+
+    public function aliases(): HasMany
+    {
+        return $this->hasMany(ProductAlias::class);
+    }
 }

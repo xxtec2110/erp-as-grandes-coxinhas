@@ -7,6 +7,7 @@ use App\Enums\StockMovementType;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\ProductMatchService;
 use App\Services\StockMovementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
@@ -73,5 +74,29 @@ class ProductManagementTest extends TestCase
         ])->assertSessionHasErrors('stock_unit');
 
         $this->assertSame('un', $product->fresh()->stock_unit);
+    }
+
+    public function test_administrator_can_manage_explicit_product_aliases(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->post(route('products.store'), [
+            'name' => 'Frango com Catupiry',
+            'stock_unit' => Product::UNIT_COUNT,
+            'active' => '1',
+            'aliases_text' => "Frango Catupiry\nCoxinha de Frango Catupiry",
+        ])->assertRedirect(route('products.index'));
+
+        $product = Product::query()->with('aliases')->firstOrFail();
+        $this->assertSame(2, $product->aliases->count());
+        $this->assertDatabaseHas('product_aliases', [
+            'product_id' => $product->id,
+            'normalized_name' => app(ProductMatchService::class)->normalize('Frango Catupiry'),
+        ]);
+
+        $this->get(route('products.edit', $product))
+            ->assertOk()
+            ->assertSee('Aliases administrativos')
+            ->assertSee('Frango Catupiry');
     }
 }

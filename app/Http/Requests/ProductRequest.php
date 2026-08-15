@@ -15,7 +15,15 @@ class ProductRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge(['active' => $this->boolean('active')]);
+        $prepared = ['active' => $this->boolean('active')];
+        if ($this->has('aliases_text')) {
+            $prepared['aliases'] = collect(preg_split('/\R/u', (string) $this->input('aliases_text')) ?: [])
+                ->map(fn (string $alias) => trim($alias))
+                ->filter()
+                ->values()
+                ->all();
+        }
+        $this->merge($prepared);
     }
 
     /** @return array<string, array<int, mixed>> */
@@ -26,6 +34,8 @@ class ProductRequest extends FormRequest
             'product_category_id' => ['nullable', 'integer', 'exists:product_categories,id'],
             'stock_unit' => ['required', Rule::in([Product::UNIT_COUNT, Product::UNIT_GRAM, Product::UNIT_MILLILITER])],
             'active' => ['required', 'boolean'],
+            'aliases' => ['sometimes', 'array', 'max:20'],
+            'aliases.*' => ['required', 'string', 'max:255'],
         ];
     }
 }

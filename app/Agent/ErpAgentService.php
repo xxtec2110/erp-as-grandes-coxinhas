@@ -68,7 +68,7 @@ class ErpAgentService
         $stored = $this->conversations->message($conversation, 'user', $message->text ?? '', ['message_type' => $message->messageType], $message->externalMessageId);
         $this->events->record('message_received', $message->channel, $user, $conversation->id, $message->externalMessageId);
         try {
-            $response = $this->dispatch($message, $user, $conversation);
+            $response = $this->dispatch($message, $user, $conversation, $identity);
         } catch (AuthorizationException) {
             $this->events->record('action_denied', $message->channel, $user, $conversation->id, $message->externalMessageId);
             $response = ErpAgentResponse::error('Você não possui autorização para essa operação ou unidade.', 'forbidden', 'unauthorized');
@@ -85,7 +85,7 @@ class ErpAgentService
         return $response;
     }
 
-    private function dispatch(AgentMessage $message, User $user, AgentConversation $conversation): ErpAgentResponse
+    private function dispatch(AgentMessage $message, User $user, AgentConversation $conversation, UserExternalIdentity $identity): ErpAgentResponse
     {
         if ($message->messageType === 'audio') {
             return ErpAgentResponse::error(
@@ -134,6 +134,13 @@ class ErpAgentService
             }
             if ($interpretation === null) {
                 return ErpAgentResponse::error('Não foi possível interpretar a solicitação com segurança.', 'command_not_understood');
+            }
+            if (($restrictedResponse = $this->restrictedProduction->handleInterpretedImage($message, $identity, $interpretation, $conversation->id)) !== null) {
+                if (! ($interpretation->usage['cached'] ?? false)) {
+                    $this->costs->record('openai', 'ai_vision', 'ai:'.$message->externalMessageId, $user, [...$interpretation->usage, 'location_id' => $restrictedResponse->data['location_id'] ?? null, 'duration_ms' => (int) ((hrtime(true) - $started) / 1_000_000), 'operation_type' => $interpretation->tool]);
+                }
+
+                return $restrictedResponse;
             }
             if ((float) $interpretation->confidence < (float) config('ai.minimum_confidence', '0.70')) {
                 $this->events->record('ai_low_confidence', $message->channel, $user, $conversation->id, $message->externalMessageId, $interpretation->tool, status: 'rejected', errorCode: 'ai_low_confidence');

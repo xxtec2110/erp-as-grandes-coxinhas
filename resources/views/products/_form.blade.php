@@ -22,5 +22,10 @@
         <p class="mt-2 text-xs text-stone-500">Não poderá ser alterada depois do primeiro movimento.</p>
     </div>
     <label class="flex items-end gap-3 pb-3 text-sm font-medium"><input type="checkbox" name="active" value="1" class="h-5 w-5 rounded border-stone-300 text-amber-600 focus:ring-amber-500" @checked(old('active', $product?->active ?? true))> Produto ativo</label>
+    <div class="sm:col-span-2">
+        <label for="aliases_text" class="form-label">Aliases administrativos</label>
+        <textarea id="aliases_text" name="aliases_text" class="form-input" rows="4" maxlength="5200" placeholder="Um nome alternativo por linha">{{ old('aliases_text', $product?->aliases?->pluck('name')->implode("\n")) }}</textarea>
+        <p class="mt-2 text-xs text-stone-500">Use apenas variações oficiais conhecidas, uma por linha. O agente nunca cria aliases automaticamente.</p>
+    </div>
 </div>
 <div class="mt-6 flex flex-wrap gap-3"><button class="btn-primary" type="submit">Salvar produto</button><a class="btn-secondary" href="{{ route('products.index') }}">Cancelar</a></div>
