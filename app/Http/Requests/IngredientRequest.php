@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Services\IngredientSemanticResolver;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class IngredientRequest extends FormRequest
 {
@@ -28,5 +30,14 @@ class IngredientRequest extends FormRequest
             'notes' => ['nullable', 'string', 'max:2000'],
             'active' => ['required', 'boolean'],
         ];
+    }
+
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            if (app(IngredientSemanticResolver::class)->isProtectedBusinessTerm((string) $this->input('name'))) {
+                $validator->errors()->add('name', 'Use Requeijão como nome do insumo. “Catupiry” é um termo comercial protegido da receita, não um estoque independente.');
+            }
+        }];
     }
 }

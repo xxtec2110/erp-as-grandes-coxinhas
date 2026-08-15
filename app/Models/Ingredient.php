@@ -38,4 +38,9 @@ class Ingredient extends Model
     {
         return $this->hasMany(PreparationIngredient::class);
     }
+
+    public function conceptBindings(): HasMany
+    {
+        return $this->hasMany(IngredientConceptBinding::class);
+    }
 }

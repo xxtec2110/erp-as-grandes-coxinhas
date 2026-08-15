@@ -4,33 +4,37 @@ namespace App\Services;
 
 use App\Models\Ingredient;
 use Brick\Math\BigDecimal;
-use Illuminate\Support\Str;
 
 class IngredientMatchService
 {
+    public function __construct(private IngredientSemanticResolver $semantics) {}
+
     public function matchItems(array $items): array
     {
-        $ingredients = Ingredient::query()->with('currentPrice')->where('active', true)->get();
-
-        return array_map(function (array $item) use ($ingredients): array {
+        return array_map(function (array $item): array {
             $name = (string) ($item['ingredient_name'] ?? $item['description'] ?? '');
-            $exact = $ingredients->filter(fn (Ingredient $ingredient) => $this->normalize($ingredient->name) === $this->normalize($name));
-            if ($exact->count() !== 1) {
-                return [...$item, '_ingredient_match' => ['status' => $exact->count() > 1 ? 'ambiguous' : 'not_found']];
+            $brand = $item['ingredient_brand'] ?? $item['brand'] ?? null;
+            $brandExplicit = filter_var($item['ingredient_brand_explicit'] ?? false, FILTER_VALIDATE_BOOL);
+            $resolution = $this->semantics->resolve($name, is_string($brand) ? $brand : null, $brandExplicit);
+            if ($resolution['business_term'] !== null && ! $brandExplicit) {
+                unset($item['ingredient_brand'], $item['brand']);
             }
-            $ingredient = $exact->first();
+            $semantic = collect($resolution)->except('ingredient')->all();
+            if ($resolution['status'] !== 'resolved') {
+                $status = $resolution['status'] === 'target_missing' ? 'not_found' : $resolution['status'];
+
+                return [...$item, 'ingredient_concept' => $resolution['concept_label'], '_ingredient_semantic' => $semantic, '_ingredient_match' => ['status' => $status, 'candidates' => $resolution['candidates'] ?? []]];
+            }
+
+            /** @var Ingredient $ingredient */
+            $ingredient = $resolution['ingredient'];
             $match = ['status' => 'exact', 'ingredient_id' => $ingredient->id, 'current_base_unit_cost' => $ingredient->currentPrice?->base_unit_cost];
             if (isset($item['base_unit_cost']) && $ingredient->currentPrice !== null) {
                 $match['found_base_unit_cost'] = (string) $item['base_unit_cost'];
                 $match['difference'] = (string) BigDecimal::of((string) $item['base_unit_cost'])->minus($ingredient->currentPrice->base_unit_cost);
             }
 
-            return [...$item, 'ingredient_id' => $ingredient->id, '_ingredient_match' => $match];
+            return [...$item, 'ingredient_id' => $ingredient->id, 'ingredient_concept' => $resolution['concept_label'], '_ingredient_semantic' => $semantic, '_ingredient_match' => $match];
         }, array_values(array_filter($items, 'is_array')));
-    }
-
-    private function normalize(string $value): string
-    {
-        return preg_replace('/[^a-z0-9]+/', '', mb_strtolower(Str::ascii(trim($value)))) ?? '';
     }
 }
