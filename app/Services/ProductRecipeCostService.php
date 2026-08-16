@@ -12,7 +12,7 @@ class ProductRecipeCostService
 
     public function calculate(ProductRecipe $recipe): array
     {
-        $recipe->load(['ingredients.ingredient.currentPrice', 'preparations.preparation']);
+        $recipe->load(['product.currentPrice', 'ingredients.ingredient.currentPrice', 'preparations.preparation']);
         $ingredients = BigDecimal::zero();
         $preparations = BigDecimal::zero();
         $missing = 0;
@@ -40,7 +40,7 @@ class ProductRecipeCostService
             $direct = $direct->dividedBy(BigDecimal::one()->minus(BigDecimal::of($recipe->technical_loss_percentage)->dividedBy(100, 12, RoundingMode::HalfUp)), 12, RoundingMode::HalfUp);
         }
         $unit = $direct->dividedBy($recipe->yield_quantity, 8, RoundingMode::HalfUp);
-        $price = $recipe->selling_price ? BigDecimal::of($recipe->selling_price) : null;
+        $price = $recipe->product->currentPrice ? BigDecimal::of($recipe->product->currentPrice->price) : null;
 
         return ['ingredients_cost' => (string) $ingredients->toScale(8, RoundingMode::HalfUp), 'preparations_cost' => (string) $preparations->toScale(8, RoundingMode::HalfUp), 'packaging_cost' => (string) BigDecimal::of($recipe->packaging_cost)->toScale(8), 'direct_cost' => (string) $direct->toScale(8, RoundingMode::HalfUp), 'unit_cost' => (string) $unit->toScale(8, RoundingMode::HalfUp), 'gross_profit' => $price ? (string) $price->minus($unit)->toScale(4, RoundingMode::HalfUp) : null, 'gross_margin' => $price && $price->isPositive() ? (string) $price->minus($unit)->multipliedBy(100)->dividedBy($price, 4, RoundingMode::HalfUp) : null, 'missing_price_count' => $missing];
     }

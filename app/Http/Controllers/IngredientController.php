@@ -6,12 +6,15 @@ use App\Http\Requests\IngredientRequest;
 use App\Models\Ingredient;
 use App\Models\IngredientCategory;
 use App\Models\Supplier;
+use App\Services\IngredientCatalogService;
 use App\Services\UnitConversionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 class IngredientController extends Controller
 {
+    public function __construct(private IngredientCatalogService $catalog) {}
+
     public function index(): View
     {
         return view('ingredients.index', [
@@ -31,7 +34,7 @@ class IngredientController extends Controller
 
     public function store(IngredientRequest $request): RedirectResponse
     {
-        $ingredient = Ingredient::query()->create($request->validated());
+        $ingredient = $this->catalog->create($request->validated());
 
         return redirect()->route('ingredients.show', $ingredient)
             ->with('success', 'Insumo cadastrado. Agora você pode adicionar o primeiro preço.');
@@ -77,7 +80,7 @@ class IngredientController extends Controller
             ])->withInput();
         }
 
-        $ingredient->update($request->validated());
+        $this->catalog->update($ingredient, $request->validated());
 
         return redirect()->route('ingredients.show', $ingredient)->with('success', 'Insumo atualizado com sucesso.');
     }

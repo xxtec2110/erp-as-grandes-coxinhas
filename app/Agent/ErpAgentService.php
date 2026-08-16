@@ -25,7 +25,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -197,6 +197,9 @@ class ErpAgentService
             unset($input['_ai_missing_fields']);
             $missing = array_values(array_unique([...$this->missing($name, $input), ...$aiMissing]));
             $action = $this->pending->prepare($user, $name, $input, $missing, $sourceKey.':action', $conversation->id);
+            if ($this->catalogWorkflow->supports($name)) {
+                return $this->catalogWorkflow->question($action);
+            }
             if ($missing !== []) {
                 if ($name === 'transfers.receive' && in_array('transfer_id', $missing, true)) {
                     return $this->transferQuestion($action, $user);
@@ -224,17 +227,20 @@ class ErpAgentService
     private function continuePending(PendingAgentAction $action, string $text, User $user, AgentMessage $message): ErpAgentResponse
     {
         $answer = mb_strtoupper(trim($text));
-        if (in_array($answer, ['NÃO', 'NAO', 'CANCELAR'], true)) {
+        if ((empty($action->missing_fields) && $answer === '2') || in_array($answer, ['NÃO', 'NAO', 'CANCELAR'], true)) {
             $this->pending->cancel($action, $user);
             $this->events->record('confirmation_cancelled', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name);
 
             return new ErpAgentResponse(true, 'Operação cancelada.');
         }
-        if (in_array($answer, ['SIM', 'CONFIRMAR'], true)) {
+        if (empty($action->missing_fields) && in_array($answer, ['1', 'SIM', 'OK', 'CONFIRMAR', 'PODE CRIAR'], true)) {
             $executed = $this->pending->confirm($action, $user, $this->executor);
             $this->events->record('confirmation_executed', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name);
 
             return new ErpAgentResponse(true, 'Operação confirmada e registrada com sucesso.', data: $executed->result ?? []);
+        }
+        if ($this->catalogWorkflow->supports($action->tool_name)) {
+            return $this->catalogWorkflow->collect($action, $text, $user);
         }
         if (preg_match('/(?:VALOR CORRETO|CORRIGIR(?: PARA)?)\D*([0-9]+(?:[.,][0-9]+)*)/ui', $text, $matches) === 1) {
             $field = array_key_exists('expected_amount', $action->payload) ? 'expected_amount' : (array_key_exists('amount', $action->payload) ? 'amount' : null);
@@ -350,6 +356,10 @@ class ErpAgentService
 
     private function confirmation(PendingAgentAction $action): ErpAgentResponse
     {
+        if ($this->catalogWorkflow->supports($action->tool_name)) {
+            return $this->catalogWorkflow->preview($action);
+        }
+
         $message = match ($action->tool_name) {
             'finance.payables.create' => $this->templates->payablePreview($action->payload),
             'agent.operations.undo' => "⚠️ CANCELAR OPERAÇÃO\n\n{$action->payload['operation_type']} #{$action->payload['operation_id']}\n\nDeseja realmente cancelar?",
@@ -523,6 +533,18 @@ class ErpAgentService
     private function missing(string $name, array $input): array
     {
         $required = match ($name) {
+            'catalog.products.create' => ['name', 'selling_price'],
+            'catalog.products.update' => ['product_id'],
+            'catalog.products.update_price' => ['product_id', 'selling_price'],
+            'catalog.product_aliases.create' => ['product_id', 'alias'],
+            'catalog.suppliers.create' => ['name'],
+            'catalog.suppliers.update' => ['supplier_id'],
+            'catalog.ingredients.create' => ['name', 'base_unit'],
+            'catalog.ingredients.update' => ['ingredient_id'],
+            'catalog.ingredient_prices.add' => ['ingredient_id', 'supplier_id', 'purchase_quantity', 'purchase_unit', 'price_paid', 'effective_date'],
+            'catalog.preparations.create' => ['name', 'expected_yield', 'yield_unit', 'total_preparation_time_minutes'],
+            'catalog.preparations.update' => ['preparation_id'],
+            'catalog.product_recipes.create', 'catalog.product_recipes.update' => ['product_id', 'yield_quantity', 'technical_loss_percentage', 'packaging_cost'],
             'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
         };
 

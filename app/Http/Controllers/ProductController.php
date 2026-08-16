@@ -5,20 +5,20 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ProductRequest;
 use App\Models\Product;
 use App\Models\ProductCategory;
-use App\Services\ProductAliasService;
+use App\Services\ProductCatalogService;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 class ProductController extends Controller
 {
-    public function __construct(private ProductAliasService $aliases) {}
+    public function __construct(private ProductCatalogService $catalog) {}
 
     public function index(): View
     {
         return view('products.index', [
-            'products' => Product::query()->with('aliases')->orderBy('name')->paginate(15),
+            'products' => Product::query()->with(['aliases', 'currentPrice', 'category', 'recipe'])
+                ->orderByRaw('CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END')
+                ->orderBy('sort_order')->orderBy('name')->paginate(25),
         ]);
     }
 
@@ -32,18 +32,14 @@ class ProductController extends Controller
         $data = $request->validated();
         $aliases = $data['aliases'] ?? [];
         unset($data['aliases']);
-
-        DB::transaction(function () use ($data, $aliases): void {
-            $product = Product::query()->create($data);
-            $this->aliases->sync($product, $aliases);
-        });
+        $this->catalog->create($data, $aliases, $request->user());
 
         return redirect()->route('products.index')->with('success', 'Produto cadastrado com sucesso.');
     }
 
     public function edit(Product $product): View
     {
-        $product->load('aliases');
+        $product->load(['aliases', 'currentPrice']);
 
         return view('products.edit', ['product' => $product, 'categories' => ProductCategory::query()->orderBy('name')->get()]);
     }
@@ -53,17 +49,7 @@ class ProductController extends Controller
         $data = $request->validated();
         $aliases = $data['aliases'] ?? $product->aliases()->pluck('name')->all();
         unset($data['aliases']);
-
-        if ($product->stockMovements()->exists() && $data['stock_unit'] !== $product->stock_unit) {
-            throw ValidationException::withMessages([
-                'stock_unit' => 'A unidade de estoque não pode ser alterada após o primeiro movimento.',
-            ]);
-        }
-
-        DB::transaction(function () use ($product, $data, $aliases): void {
-            $product->update($data);
-            $this->aliases->sync($product, $aliases);
-        });
+        $this->catalog->update($product, $data, $aliases, $request->user());
 
         return redirect()->route('products.index')->with('success', 'Produto atualizado com sucesso.');
     }

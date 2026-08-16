@@ -15,6 +15,7 @@ class ProductRecipeController extends Controller
 {
     public function edit(Product $product, ProductRecipeCostService $costs): View
     {
+        $product->load('currentPrice');
         $recipe = $product->recipe()->with(['ingredients.ingredient', 'preparations.preparation'])->first();
 
         return view('products.recipe', ['product' => $product, 'recipe' => $recipe, 'ingredients' => Ingredient::query()->where('active', true)->orderBy('name')->get(), 'preparations' => Preparation::query()->where('active', true)->orderBy('name')->get(), 'costs' => $recipe ? $costs->calculate($recipe) : null]);
@@ -22,7 +23,7 @@ class ProductRecipeController extends Controller
 
     public function update(ProductRecipeRequest $request, Product $product, ProductRecipeService $service): RedirectResponse
     {
-        $service->save($product, $request->validated());
+        $service->save($product, $request->validated(), $request->user());
 
         return back()->with('success', 'Ficha técnica atualizada.');
     }

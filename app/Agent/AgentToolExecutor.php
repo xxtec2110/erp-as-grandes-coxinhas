@@ -12,6 +12,7 @@ use App\Models\StockTransfer;
 use App\Models\User;
 use App\Services\AgentAccessManagementService;
 use App\Services\AuthorizationService;
+use App\Services\CatalogAgentToolService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
@@ -35,9 +36,9 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
 
-    public function execute(string $name, array $input, User $user, bool $confirmed = false): mixed
+    public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
         $tool = $this->registry->get($name) ?? throw new DomainException('Ferramenta não registrada.');
         $location = $input['location_id'] ?? null;
@@ -58,6 +59,10 @@ class AgentToolExecutor
         }
 
         return match ($name) {
+            'catalog.products.create', 'catalog.products.update', 'catalog.products.update_price', 'catalog.product_aliases.create',
+            'catalog.suppliers.create', 'catalog.suppliers.update', 'catalog.ingredients.create', 'catalog.ingredients.update',
+            'catalog.ingredient_prices.add', 'catalog.preparations.create', 'catalog.preparations.update',
+            'catalog.product_recipes.create', 'catalog.product_recipes.update' => $this->catalog->execute($name, $input, $user, $context['channel'] ?? 'agent'),
             'agent.access.permission.grant' => $this->accessManagement->permission($input, $user, true),
             'agent.access.permission.revoke' => $this->accessManagement->permission($input, $user, false),
             'agent.access.location.grant' => $this->accessManagement->location($input, $user, true),

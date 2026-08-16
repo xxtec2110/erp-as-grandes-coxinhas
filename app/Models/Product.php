@@ -18,11 +18,11 @@ class Product extends Model
 
     public const UNIT_COUNT = 'un';
 
-    protected $fillable = ['name', 'product_category_id', 'stock_unit', 'active'];
+    protected $fillable = ['name', 'product_category_id', 'stock_unit', 'sort_order', 'active'];
 
     protected function casts(): array
     {
-        return ['active' => 'boolean'];
+        return ['sort_order' => 'integer', 'active' => 'boolean'];
     }
 
     public function stockMovements(): HasMany
@@ -68,5 +68,15 @@ class Product extends Model
     public function aliases(): HasMany
     {
         return $this->hasMany(ProductAlias::class);
+    }
+
+    public function prices(): HasMany
+    {
+        return $this->hasMany(ProductPrice::class);
+    }
+
+    public function currentPrice(): HasOne
+    {
+        return $this->hasOne(ProductPrice::class)->where('is_current', true);
     }
 }

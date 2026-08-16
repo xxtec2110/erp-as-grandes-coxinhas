@@ -13,7 +13,11 @@ class ProductRecipeRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge(['ingredients' => array_values(array_filter($this->input('ingredients', []), fn (array $item) => filled($item['quantity'] ?? null))), 'preparations' => array_values(array_filter($this->input('preparations', []), fn (array $item) => filled($item['quantity'] ?? null)))]);
+        $price = $this->filled('selling_price') ? trim((string) $this->input('selling_price')) : null;
+        if ($price !== null && str_contains($price, ',')) {
+            $price = str_replace(['.', ','], ['', '.'], $price);
+        }
+        $this->merge(['selling_price' => $price, 'ingredients' => array_values(array_filter($this->input('ingredients', []), fn (array $item) => filled($item['quantity'] ?? null))), 'preparations' => array_values(array_filter($this->input('preparations', []), fn (array $item) => filled($item['quantity'] ?? null)))]);
     }
 
     public function rules(): array

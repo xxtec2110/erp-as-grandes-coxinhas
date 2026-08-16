@@ -23,6 +23,12 @@ class ProductRequest extends FormRequest
                 ->values()
                 ->all();
         }
+        if ($this->filled('selling_price')) {
+            $value = trim((string) $this->input('selling_price'));
+            $prepared['selling_price'] = str_contains($value, ',')
+                ? str_replace(['.', ','], ['', '.'], $value)
+                : $value;
+        }
         $this->merge($prepared);
     }
 
@@ -33,6 +39,8 @@ class ProductRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'product_category_id' => ['nullable', 'integer', 'exists:product_categories,id'],
             'stock_unit' => ['required', Rule::in([Product::UNIT_COUNT, Product::UNIT_GRAM, Product::UNIT_MILLILITER])],
+            'sort_order' => ['nullable', 'integer', 'min:1', 'max:999999'],
+            'selling_price' => ['nullable', 'decimal:0,4', 'gt:0'],
             'active' => ['required', 'boolean'],
             'aliases' => ['sometimes', 'array', 'max:20'],
             'aliases.*' => ['required', 'string', 'max:255'],

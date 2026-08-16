@@ -21,6 +21,8 @@
         </select>
         <p class="mt-2 text-xs text-stone-500">Não poderá ser alterada depois do primeiro movimento.</p>
     </div>
+    <div><label for="sort_order" class="form-label">Ordem de exibição</label><input id="sort_order" name="sort_order" type="number" min="1" class="form-input" value="{{ old('sort_order', $product?->sort_order) }}" placeholder="Ex.: 1"></div>
+    <div><label for="selling_price" class="form-label">Preço de venda atual (R$)</label><input id="selling_price" name="selling_price" inputmode="decimal" class="form-input" value="{{ old('selling_price', $product?->currentPrice?->price) }}" placeholder="Ex.: 22.00"><p class="mt-2 text-xs text-stone-500">Alterações preservam o histórico de preços.</p></div>
     <label class="flex items-end gap-3 pb-3 text-sm font-medium"><input type="checkbox" name="active" value="1" class="h-5 w-5 rounded border-stone-300 text-amber-600 focus:ring-amber-500" @checked(old('active', $product?->active ?? true))> Produto ativo</label>
     <div class="sm:col-span-2">
         <label for="aliases_text" class="form-label">Aliases administrativos</label>

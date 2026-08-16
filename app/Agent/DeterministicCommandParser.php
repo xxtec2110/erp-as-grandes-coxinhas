@@ -3,14 +3,40 @@
 namespace App\Agent;
 
 use App\Models\Product;
+use App\Services\ProductMatchService;
 use Illuminate\Support\Str;
 
 class DeterministicCommandParser
 {
+    public function __construct(private ProductMatchService $products) {}
+
     public function parse(string $text): ?array
     {
         $trimmed = trim($text);
         $value = mb_strtoupper(Str::ascii($trimmed));
+
+        if (in_array($value, ['QUERO CRIAR UM NOVO SABOR DE COXINHA', 'QUERO CRIAR UM NOVO SABOR', 'QUERO CADASTRAR UM NOVO PRODUTO'], true)) {
+            return ['tool' => 'catalog.products.create', 'arguments' => []];
+        }
+        if (preg_match('/^(?:CRIE|CADASTRE)\s+(.+?)\s+(?:POR|A)\s+R?\$?\s*([0-9]+(?:[.,][0-9]{1,4})?)$/ui', $trimmed, $matches) === 1) {
+            return ['tool' => 'catalog.products.create', 'arguments' => ['name' => trim($matches[1]), 'selling_price' => str_replace(',', '.', $matches[2])]];
+        }
+        if (preg_match('/^ALTERE\s+(.+?)\s+(?:PARA|A)\s+R?\$?\s*([0-9]+(?:[.,][0-9]{1,4})?)$/ui', $trimmed, $matches) === 1) {
+            $needle = $this->products->normalize($matches[1]);
+            $found = Product::query()->get()->filter(fn (Product $product) => $this->products->normalize($product->name) === $needle);
+            if ($found->count() === 1) {
+                return ['tool' => 'catalog.products.update_price', 'arguments' => ['product_id' => $found->first()->id, 'selling_price' => str_replace(',', '.', $matches[2])]];
+            }
+        }
+        if (in_array($value, ['QUERO ADICIONAR UM NOVO FORNECEDOR', 'QUERO CADASTRAR UM FORNECEDOR'], true)) {
+            return ['tool' => 'catalog.suppliers.create', 'arguments' => []];
+        }
+        if (preg_match('/^(?:CADASTRE|CRIE)(?: O INSUMO)?\s+(.+)$/ui', $trimmed, $matches) === 1 && str_contains($value, 'INSUMO')) {
+            return ['tool' => 'catalog.ingredients.create', 'arguments' => ['name' => trim($matches[1])]];
+        }
+        if (in_array($value, ['QUERO CRIAR UM RECHEIO', 'QUERO CRIAR UM PREPARO'], true)) {
+            return ['tool' => 'catalog.preparations.create', 'arguments' => []];
+        }
 
         if (preg_match('/^LIBERA AUDIO PARA (.+)$/', $value, $matches) === 1) {
             return ['tool' => 'agent.access.permission.grant', 'arguments' => ['target_user_name' => trim($matches[1]), 'permission' => 'agent.audio.use']];

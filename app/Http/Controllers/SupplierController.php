@@ -4,16 +4,17 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\SupplierRequest;
 use App\Models\Supplier;
+use App\Services\SupplierCatalogService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 class SupplierController extends Controller
 {
+    public function __construct(private SupplierCatalogService $catalog) {}
+
     public function index(): View
     {
-        return view('suppliers.index', [
-            'suppliers' => Supplier::query()->orderBy('name')->paginate(15),
-        ]);
+        return view('suppliers.index', ['suppliers' => Supplier::query()->orderBy('name')->paginate(15)]);
     }
 
     public function create(): View
@@ -23,7 +24,7 @@ class SupplierController extends Controller
 
     public function store(SupplierRequest $request): RedirectResponse
     {
-        Supplier::query()->create($request->validated());
+        $this->catalog->create($request->validated());
 
         return redirect()->route('suppliers.index')->with('success', 'Fornecedor cadastrado com sucesso.');
     }
@@ -35,7 +36,7 @@ class SupplierController extends Controller
 
     public function update(SupplierRequest $request, Supplier $supplier): RedirectResponse
     {
-        $supplier->update($request->validated());
+        $this->catalog->update($supplier, $request->validated());
 
         return redirect()->route('suppliers.index')->with('success', 'Fornecedor atualizado com sucesso.');
     }

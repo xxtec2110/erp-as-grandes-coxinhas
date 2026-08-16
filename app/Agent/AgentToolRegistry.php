@@ -3,6 +3,7 @@
 namespace App\Agent;
 
 use App\Services\AgentAccessManagementService;
+use App\Services\CatalogAgentToolService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
@@ -28,6 +29,19 @@ class AgentToolRegistry
     public function all(): array
     {
         return collect([
+            new AgentToolDefinition('catalog.products.create', 'products.create', false, true, true, ['name' => 'string', 'selling_price' => 'decimal', 'product_category_id' => 'integer|null', 'stock_unit' => 'string|null', 'sort_order' => 'integer|null', 'active' => 'boolean|null'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.products.update', 'products.update', false, true, true, ['product_id' => 'integer'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.products.update_price', 'prices.manage', false, true, true, ['product_id' => 'integer', 'selling_price' => 'decimal'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.product_aliases.create', 'products.update', false, true, true, ['product_id' => 'integer', 'alias' => 'string'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.suppliers.create', 'suppliers.manage', false, true, true, ['name' => 'string'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.suppliers.update', 'suppliers.manage', false, true, true, ['supplier_id' => 'integer'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.ingredients.create', 'ingredients.create', false, true, true, ['name' => 'string', 'base_unit' => 'string'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.ingredients.update', 'ingredients.update', false, true, true, ['ingredient_id' => 'integer'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.ingredient_prices.add', 'ingredient_prices.update', false, true, true, ['ingredient_id' => 'integer', 'supplier_id' => 'integer', 'purchase_quantity' => 'decimal', 'purchase_unit' => 'string', 'price_paid' => 'decimal', 'effective_date' => 'date'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.preparations.create', 'preparations.create', false, true, true, ['name' => 'string', 'expected_yield' => 'decimal', 'yield_unit' => 'string', 'total_preparation_time_minutes' => 'integer'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.preparations.update', 'preparations.update', false, true, true, ['preparation_id' => 'integer'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.product_recipes.create', 'product_recipes.manage', false, true, true, ['product_id' => 'integer', 'yield_quantity' => 'decimal', 'technical_loss_percentage' => 'decimal', 'packaging_cost' => 'decimal'], ['id' => 'integer'], CatalogAgentToolService::class),
+            new AgentToolDefinition('catalog.product_recipes.update', 'product_recipes.manage', false, true, true, ['product_id' => 'integer', 'yield_quantity' => 'decimal', 'technical_loss_percentage' => 'decimal', 'packaging_cost' => 'decimal'], ['id' => 'integer'], CatalogAgentToolService::class),
             new AgentToolDefinition('agent.access.permission.grant', 'users.manage', false, true, true, ['target_user_name' => 'string', 'permission' => 'string'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('agent.access.permission.revoke', 'users.manage', false, true, true, ['target_user_name' => 'string', 'permission' => 'string'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('agent.access.location.grant', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
