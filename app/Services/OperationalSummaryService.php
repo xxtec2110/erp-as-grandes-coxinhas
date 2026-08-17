@@ -58,6 +58,9 @@ class OperationalSummaryService
         $sales = ProductSale::query()->whereBelongsTo($location)->whereBetween('operation_date', [$startDate, $endDate]);
         $summary['revenue'] = ['brl' => (string) BigDecimal::of((clone $sales)->sum('gross_amount'))->toScale(2, RoundingMode::HalfUp)];
         $summary['fees'] = ['brl' => (string) BigDecimal::of((clone $sales)->sum('fee_amount_snapshot'))->toScale(2, RoundingMode::HalfUp)];
+        $summary['cost_of_goods'] = ['brl' => (string) BigDecimal::of((clone $sales)->sum('total_cost_snapshot'))->toScale(2, RoundingMode::HalfUp)];
+        $summary['gross_profit'] = ['brl' => (string) BigDecimal::of($summary['revenue']['brl'])->minus($summary['cost_of_goods']['brl'])->toScale(2, RoundingMode::HalfUp)];
+        $summary['missing_cost_count'] = ['count' => (string) (clone $sales)->whereNull('unit_cost_snapshot')->count()];
 
         return $summary;
     }

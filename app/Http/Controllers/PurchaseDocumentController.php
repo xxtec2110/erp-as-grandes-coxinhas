@@ -38,7 +38,7 @@ class PurchaseDocumentController
     {
         $authorization->authorize($request->user(), 'purchases.view', $document->location_id);
 
-        return view('purchases.show', ['document' => $document->load(['supplier', 'location', 'items.ingredient']), 'key' => (string) Str::uuid()]);
+        return view('purchases.show', ['document' => $document->load(['supplier', 'location', 'items.ingredient.currentPrice', 'items.priceHistory', 'receipts.items']), 'key' => (string) Str::uuid()]);
     }
 
     public function store(PurchaseDocumentRequest $r, CreatePurchaseDocumentService $s): RedirectResponse

@@ -19,6 +19,7 @@ use App\Services\AuthorizationService;
 use App\Services\RestrictedProductionInteractionService;
 use App\Services\UndoLastOperationService;
 use App\Services\WhatsAppIdentityResolver;
+use App\Support\DecimalFormatter;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Throwable;
@@ -201,6 +202,9 @@ class ErpAgentService
                 return $this->catalogWorkflow->question($action);
             }
             if ($missing !== []) {
+                if ($name === 'purchases.documents.create' && in_array('received', $missing, true) && count($missing) === 1) {
+                    return new ErpAgentResponse(true, 'A mercadoria deste documento já foi recebida fisicamente? Responda SIM ou NÃO.', pendingAction: ['id' => $action->id]);
+                }
                 if ($name === 'transfers.receive' && in_array('transfer_id', $missing, true)) {
                     return $this->transferQuestion($action, $user);
                 }
@@ -210,7 +214,10 @@ class ErpAgentService
                 if (in_array('supplier_id', $missing, true) && isset($input['_supplier_match']['candidates'])) {
                     $names = collect($input['_supplier_match']['candidates'])->pluck('name')->implode(', ');
 
-                    return new ErpAgentResponse(true, $names !== '' ? 'Encontrei fornecedores parecidos: '.$names.'. Qual deles é o correto?' : 'Não encontrei esse fornecedor cadastrado.', pendingAction: ['id' => $action->id]);
+                    return new ErpAgentResponse(true, $names !== '' ? 'Encontrei fornecedores parecidos: '.$names.'. Qual deles é o correto?' : 'Não encontrei esse fornecedor cadastrado. A prévia ficará pendente até o vínculo manual.', 'confirmation', $action->payload, pendingAction: ['id' => $action->id]);
+                }
+                if ($name === 'purchases.documents.create') {
+                    return new ErpAgentResponse(true, 'A prévia foi preservada, mas ainda precisa dos vínculos: '.implode(', ', $missing).'.', 'confirmation', $action->payload, pendingAction: ['id' => $action->id]);
                 }
 
                 return new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
@@ -227,6 +234,17 @@ class ErpAgentService
     private function continuePending(PendingAgentAction $action, string $text, User $user, AgentMessage $message): ErpAgentResponse
     {
         $answer = mb_strtoupper(trim($text));
+        if (in_array('received', $action->missing_fields ?? [], true) && in_array($answer, ['SIM', 'NÃO', 'NAO'], true)) {
+            $received = $answer === 'SIM';
+            $payload = [...$action->payload, 'received' => $received];
+            if ($received && ! isset($payload['received_date'])) {
+                $payload['received_date'] = $payload['issue_date'] ?? now()->toDateString();
+            }
+            $missing = $this->missing($action->tool_name, $payload);
+            $action = $this->pending->merge($action, $user, ['received' => $received, 'received_date' => $payload['received_date'] ?? null], $missing);
+
+            return $missing === [] ? $this->confirmation($action) : new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
+        }
         if ((empty($action->missing_fields) && $answer === '2') || in_array($answer, ['NÃO', 'NAO', 'CANCELAR'], true)) {
             $this->pending->cancel($action, $user);
             $this->events->record('confirmation_cancelled', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name);
@@ -364,6 +382,7 @@ class ErpAgentService
             'finance.payables.create' => $this->templates->payablePreview($action->payload),
             'agent.operations.undo' => "⚠️ CANCELAR OPERAÇÃO\n\n{$action->payload['operation_type']} #{$action->payload['operation_id']}\n\nDeseja realmente cancelar?",
             'production.orders.plan', 'production.orders.complete_batch' => $this->productionOrderPreview($action),
+            'purchases.documents.create' => $this->purchasePreview($action),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
 
@@ -397,6 +416,29 @@ class ErpAgentService
         }
         $lines[] = '';
         $lines[] = 'Confirmar?';
+
+        return implode("\n", $lines);
+    }
+
+    private function purchasePreview(PendingAgentAction $action): string
+    {
+        $payload = $action->payload;
+        $supplier = isset($payload['supplier_id']) ? Supplier::query()->find($payload['supplier_id'])?->name : 'Não identificado';
+        $lines = [
+            '🧾 PRÉVIA DA COMPRA',
+            '',
+            'Fornecedor: '.$supplier,
+            'Documento: '.($payload['document_number'] ?? 'Sem número'),
+            'Data: '.($payload['issue_date'] ?? 'Não informada'),
+            'Total: R$ '.DecimalFormatter::format((string) ($payload['total_amount'] ?? '0'), 2),
+            'Recebimento físico: '.(($payload['received'] ?? false) ? 'Sim' : 'Não'),
+            '',
+        ];
+        foreach ($payload['items'] ?? [] as $item) {
+            $lines[] = ($item['description'] ?? $item['ingredient_name'] ?? 'Item').' — '.($item['quantity'] ?? '?').' '.($item['unit'] ?? '').' — R$ '.DecimalFormatter::format((string) ($item['net_amount'] ?? $item['total_price'] ?? '0'), 2);
+        }
+        $lines[] = '';
+        $lines[] = 'Confirma o lançamento?';
 
         return implode("\n", $lines);
     }
@@ -545,7 +587,7 @@ class ErpAgentService
             'catalog.preparations.create' => ['name', 'expected_yield', 'yield_unit', 'total_preparation_time_minutes'],
             'catalog.preparations.update' => ['preparation_id'],
             'catalog.product_recipes.create', 'catalog.product_recipes.update' => ['product_id', 'yield_quantity', 'technical_loss_percentage', 'packaging_cost'],
-            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id'], default => []
+            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items', 'received'], default => []
         };
 
         return array_values(array_filter($required, fn ($key) => ! isset($input[$key]) || $input[$key] === ''));

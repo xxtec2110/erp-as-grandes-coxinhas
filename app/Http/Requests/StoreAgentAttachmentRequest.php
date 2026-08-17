@@ -18,7 +18,7 @@ class StoreAgentAttachmentRequest extends FormRequest
 
         return [
             'attachment' => ['required', 'file', 'max:'.$maximum, 'mimes:pdf,jpg,jpeg,png', 'extensions:pdf,jpg,jpeg,png'],
-            'purpose' => ['required', Rule::in(['agent', 'purchase', 'finance'])],
+            'purpose' => ['required', Rule::in(['agent', 'purchase', 'purchase_import', 'finance'])],
             'location_id' => ['required', 'integer', 'exists:locations,id'],
             'retention_type' => ['required', Rule::in(['temporary', 'official'])],
         ];

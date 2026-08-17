@@ -128,6 +128,7 @@ class AgentAttachmentService
     {
         $permission = match ($purpose) {
             'purchase' => $write ? 'purchases.create' : 'purchases.view',
+            'purchase_import' => $write ? 'purchases.import' : 'purchases.view',
             'finance' => $write ? 'finance.payments.create' : 'finance.view',
             default => match (true) {
                 str_starts_with($mime, 'image/') => 'agent.image.use',

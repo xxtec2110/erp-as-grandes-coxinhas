@@ -22,6 +22,7 @@ class PreparationCostService
         ]);
         $total = BigDecimal::zero();
         $missingPrices = 0;
+        $missingComponents = [];
         $ingredients = [];
 
         foreach ($preparation->preparationIngredients as $item) {
@@ -35,6 +36,7 @@ class PreparationCostService
 
             if ($currentPrice === null) {
                 $missingPrices++;
+                $missingComponents[] = 'Insumo: '.$item->ingredient->name;
             } else {
                 $itemCost = (string) BigDecimal::of($currentPrice->base_unit_cost)
                     ->multipliedBy($normalizedQuantity)
@@ -58,6 +60,10 @@ class PreparationCostService
             ->plus($additionalCosts['total_cost'])
             ->toScale(8, RoundingMode::HalfUp);
         $missingPriceCount = $missingPrices + $energy['missing_price_count'];
+        $missingComponents = array_values(array_unique([
+            ...$missingComponents,
+            ...$energy['missing_components'],
+        ]));
 
         return [
             'ingredients' => $ingredients,
@@ -71,6 +77,7 @@ class PreparationCostService
             'missing_ingredient_price_count' => $missingPrices,
             'missing_glp_price_count' => $energy['missing_price_count'],
             'missing_price_count' => $missingPriceCount,
+            'missing_components' => $missingComponents,
             'yield' => $this->calculateYield($preparation),
             'unit_costs' => $missingPriceCount === 0
                 ? $this->calculateFinalUnitCosts($preparation, $totalPreparationCost)
@@ -78,12 +85,13 @@ class PreparationCostService
         ];
     }
 
-    /** @return array{usages: array<int, array<string, mixed>>, total_consumption_kg: string, total_cost: string, missing_price_count: int} */
+    /** @return array{usages: array<int, array<string, mixed>>, total_consumption_kg: string, total_cost: string, missing_price_count: int, missing_components: array<int, string>} */
     private function calculateEnergy(Preparation $preparation): array
     {
         $totalConsumption = BigDecimal::zero();
         $totalCost = BigDecimal::zero();
         $missingPrices = 0;
+        $missingComponents = [];
         $usages = [];
 
         foreach ($preparation->energyUsages as $usage) {
@@ -100,6 +108,7 @@ class PreparationCostService
 
             if ($currentPrice === null) {
                 $missingPrices++;
+                $missingComponents[] = 'GLP: '.$usage->glpProduct->name;
             } else {
                 $cost = (string) $consumption
                     ->multipliedBy($currentPrice->unit_cost_per_kg)
@@ -121,6 +130,7 @@ class PreparationCostService
             'total_consumption_kg' => (string) $totalConsumption->toScale(8, RoundingMode::HalfUp),
             'total_cost' => (string) $totalCost->toScale(8, RoundingMode::HalfUp),
             'missing_price_count' => $missingPrices,
+            'missing_components' => array_values(array_unique($missingComponents)),
         ];
     }
 

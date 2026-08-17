@@ -79,4 +79,14 @@ class Product extends Model
     {
         return $this->hasOne(ProductPrice::class)->where('is_current', true);
     }
+
+    public function costSnapshots(): HasMany
+    {
+        return $this->hasMany(ProductCostSnapshot::class);
+    }
+
+    public function currentCostSnapshot(): HasOne
+    {
+        return $this->hasOne(ProductCostSnapshot::class)->latestOfMany('effective_at');
+    }
 }

@@ -43,4 +43,9 @@ class Ingredient extends Model
     {
         return $this->hasMany(IngredientConceptBinding::class);
     }
+
+    public function supplierMappings(): HasMany
+    {
+        return $this->hasMany(SupplierIngredientMapping::class);
+    }
 }

@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\AgentAccessManagementService;
 use App\Services\AuthorizationService;
 use App\Services\CatalogAgentToolService;
+use App\Services\CostQueryService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
@@ -27,6 +28,7 @@ use App\Services\ProductionService;
 use App\Services\ProductLossService;
 use App\Services\PurchaseDocumentActionService;
 use App\Services\PurchaseQueryService;
+use App\Services\PurchaseReceiptService;
 use App\Services\RegisterPaymentService;
 use App\Services\StockPositionService;
 use App\Services\StockTransferQueryService;
@@ -36,7 +38,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
@@ -92,8 +94,16 @@ class AgentToolExecutor
             'finance.reports.summary' => $this->reports->summary($this->authorization->accessibleLocations($user)->pluck('id')->all(), ...$this->period($input)),
             'purchases.documents.list' => $this->purchases->documents($user, isset($input['location_id']) ? (int) $input['location_id'] : null),
             'purchases.documents.get' => $this->purchases->document($user, (int) $input['id']),
-            'purchases.documents.create' => $this->createDocument->create($input, $user, 'agent'),
+            'purchases.documents.create' => $this->createPurchase($input, $user),
             'purchases.items.list' => $this->purchases->items($user, (int) $input['document_id']),
+            'purchases.history' => $this->purchases->history($user, $input),
+            'costs.ingredients.current' => $this->costs->ingredientCurrent($user, (int) $input['ingredient_id']),
+            'costs.ingredients.history' => $this->costs->ingredientHistory($user, (int) $input['ingredient_id']),
+            'costs.ingredients.compare_suppliers' => $this->costs->compareSuppliers($user, (int) $input['ingredient_id']),
+            'costs.products.current' => $this->costs->productCurrent($user, (int) $input['product_id']),
+            'costs.products.history' => $this->costs->productHistory($user, (int) $input['product_id']),
+            'costs.products.margin' => $this->costs->productMargin($user, (int) $input['product_id']),
+            'costs.products.margin_history' => $this->costs->productMargin($user, (int) $input['product_id'], $input['date']),
             'purchases.link_supplier' => $this->purchaseActions->linkSupplier(PurchaseDocument::query()->findOrFail($input['document_id']), (int) $input['supplier_id'], $user),
             'purchases.suggest_ingredient_price_update' => $this->purchaseActions->ingredientPriceSuggestion(PurchaseDocumentItem::query()->findOrFail($input['item_id']), $user),
             'agent.operations.undo' => $this->undo->undo($input, $user),
@@ -109,6 +119,18 @@ class AgentToolExecutor
         }
 
         return $this->transferOperations->receive($transfer, $input['received_date'], [$transfer->items->sole()->id => (string) $input['quantity_received']], $user->id);
+    }
+
+    private function createPurchase(array $input, User $user): PurchaseDocument
+    {
+        $received = filter_var($input['received'] ?? false, FILTER_VALIDATE_BOOL);
+        $receivedDate = $input['received_date'] ?? $input['issue_date'] ?? now()->toDateString();
+        $document = $this->createDocument->create($input, $user, 'agent');
+        if ($received && $document->source_type !== 'quote') {
+            return $this->purchaseReceipts->receive($document, $receivedDate, $user, 'agent');
+        }
+
+        return $document;
     }
 
     /** @return array{string,string} */

@@ -7,12 +7,21 @@ use Brick\Math\BigDecimal;
 
 class IngredientMatchService
 {
-    public function __construct(private IngredientSemanticResolver $semantics) {}
+    public function __construct(private IngredientSemanticResolver $semantics, private SupplierIngredientMappingService $supplierMappings) {}
 
-    public function matchItems(array $items): array
+    public function matchItems(array $items, ?int $supplierId = null): array
     {
-        return array_map(function (array $item): array {
+        return array_map(function (array $item) use ($supplierId): array {
             $name = (string) ($item['ingredient_name'] ?? $item['description'] ?? '');
+            if ($supplierId !== null && $name !== '') {
+                $supplierMatch = $this->supplierMappings->match($supplierId, isset($item['external_code']) ? (string) $item['external_code'] : null, $name);
+                if ($supplierMatch['status'] === 'resolved') {
+                    /** @var Ingredient $ingredient */
+                    $ingredient = $supplierMatch['ingredient'];
+
+                    return [...$item, 'ingredient_id' => $ingredient->id, '_ingredient_match' => ['status' => 'exact', 'source' => $supplierMatch['source'], 'mapping_id' => $supplierMatch['mapping_id'], 'ingredient_id' => $ingredient->id, 'current_base_unit_cost' => $ingredient->currentPrice?->base_unit_cost]];
+                }
+            }
             $brand = $item['ingredient_brand'] ?? $item['brand'] ?? null;
             $brandExplicit = filter_var($item['ingredient_brand_explicit'] ?? false, FILTER_VALIDATE_BOOL);
             $resolution = $this->semantics->resolve($name, is_string($brand) ? $brand : null, $brandExplicit);
@@ -28,7 +37,7 @@ class IngredientMatchService
 
             /** @var Ingredient $ingredient */
             $ingredient = $resolution['ingredient'];
-            $match = ['status' => 'exact', 'ingredient_id' => $ingredient->id, 'current_base_unit_cost' => $ingredient->currentPrice?->base_unit_cost];
+            $match = ['status' => 'exact', 'source' => $resolution['resolution_source'], 'ingredient_id' => $ingredient->id, 'current_base_unit_cost' => $ingredient->currentPrice?->base_unit_cost];
             if (isset($item['base_unit_cost']) && $ingredient->currentPrice !== null) {
                 $match['found_base_unit_cost'] = (string) $item['base_unit_cost'];
                 $match['difference'] = (string) BigDecimal::of((string) $item['base_unit_cost'])->minus($ingredient->currentPrice->base_unit_cost);

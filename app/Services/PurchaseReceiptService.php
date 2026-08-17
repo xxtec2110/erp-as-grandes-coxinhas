@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class PurchaseReceiptService
 {
-    public function __construct(private AuthorizationService $authorization, private UnitConversionService $units, private IngredientStockService $stock, private FinanceAuditService $audit) {}
+    public function __construct(private AuthorizationService $authorization, private UnitConversionService $units, private IngredientStockService $stock, private FinanceAuditService $audit, private IngredientPriceService $prices) {}
 
     public function receive(PurchaseDocument $document, string $receivedDate, User $user, string $source = 'web'): PurchaseDocument
     {
@@ -50,6 +50,12 @@ class PurchaseReceiptService
                 }$receiptItem = $receipt->items()->create(['purchase_document_item_id' => $item->id, 'quantity_received' => (string) $quantity]);
                 $normalized = $this->units->normalize((string) $quantity, $item->unit, $item->ingredient->base_unit);
                 $this->stock->record(['ingredient_id' => $item->ingredient_id, 'location_id' => $document->location_id, 'type' => 'purchase_receipt', 'quantity_delta' => $normalized, 'operation_date' => $receivedDate, 'reference_type' => get_class($receiptItem), 'reference_id' => $receiptItem->id, 'idempotency_key' => "{$idempotencyKey}:item:{$item->id}", 'created_by' => $user->id, 'source' => $source, 'notes' => "Recebimento parcial do documento #{$document->id}."]);
+                $price = $item->priceHistory()->first();
+                if ($price === null && $document->supplier_id !== null) {
+                    $price = $this->prices->record($item->ingredient, ['supplier_id' => $document->supplier_id, 'location_id' => $document->location_id, 'purchase_document_id' => $document->id, 'purchase_item_id' => $item->id, 'purchase_quantity' => $item->quantity, 'purchase_unit' => $item->unit, 'price_paid' => $item->net_amount ?? $item->total_price, 'gross_total' => $item->gross_amount ?? $item->total_price, 'net_total' => $item->net_amount ?? $item->total_price, 'effective_date' => $document->issue_date->toDateString(), 'purchase_date' => $document->issue_date->toDateString(), 'received_at' => now(), 'source_type' => 'receipt', 'currency' => $document->currency ?? 'BRL', 'created_by' => $user->id, 'source_channel' => $source]);
+                } elseif ($price !== null && $price->received_at === null) {
+                    $price->update(['received_at' => now()]);
+                }
                 $item->update(['received_quantity' => (string) BigDecimal::of($item->received_quantity ?? 0)->plus($quantity)->toScale(6)]);
                 $receivedAny = true;
             }

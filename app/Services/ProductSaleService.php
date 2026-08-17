@@ -5,17 +5,19 @@ namespace App\Services;
 use App\Data\Stock\RecordStockMovementData;
 use App\Enums\StockMovementType;
 use App\Models\Location;
+use App\Models\Product;
 use App\Models\ProductSale;
 use App\Models\StockMovement;
 use App\Models\User;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class ProductSaleService
 {
-    public function __construct(private StockMovementService $movements, private StockBalanceService $balances, private AuthorizationService $authorization, private PaymentFeeResolver $feeResolver, private PaymentFeeCalculator $feeCalculator) {}
+    public function __construct(private StockMovementService $movements, private StockBalanceService $balances, private AuthorizationService $authorization, private PaymentFeeResolver $feeResolver, private PaymentFeeCalculator $feeCalculator, private ProductCostSnapshotService $costSnapshots) {}
 
     /** @param array<string, mixed> $data */
     public function record(array $data, User $user, string $source = 'web'): ProductSale
@@ -47,7 +49,15 @@ class ProductSaleService
             if (BigDecimal::of($this->balances->balance((int) $data['product_id'], (int) $data['location_id']))->isLessThan($quantity)) {
                 throw new DomainException('Estoque insuficiente para registrar a venda.');
             }
-            $sale = ProductSale::query()->create(['product_id' => $data['product_id'], 'location_id' => $data['location_id'], 'acquirer_id' => $data['acquirer_id'] ?? null, 'card_brand_id' => $data['card_brand_id'] ?? null, 'payment_method' => $method, 'installments' => $data['installments'] ?? null, 'quantity' => (string) $quantity, 'unit_price' => (string) $price, 'total_amount' => (string) $total, 'gross_amount' => (string) $total, 'fee_percentage_snapshot' => $percentage, 'fixed_fee_snapshot' => $fixedFee, 'fee_amount_snapshot' => $financial['fee_amount'], 'net_amount' => $financial['net_amount'], 'payment_fee_id' => $fee?->id, 'operation_date' => $data['operation_date'], 'source' => $source, 'pdv_connection_id' => $data['pdv_connection_id'] ?? null, 'external_sale_id' => $data['external_sale_id'] ?? null, 'external_item_id' => $data['external_item_id'] ?? null, 'external_status' => $data['external_status'] ?? null, 'external_updated_at' => $data['external_updated_at'] ?? null, 'idempotency_key' => $data['idempotency_key'], 'created_by' => $user->id, 'notes' => $data['notes'] ?? null]);
+            $product = Product::query()->with(['recipe', 'currentPrice'])->findOrFail($data['product_id']);
+            $operationDate = Carbon::parse($data['operation_date']);
+            $costSnapshot = $operationDate->greaterThanOrEqualTo(today())
+                ? $this->costSnapshots->current($product, 'sale', (string) $data['idempotency_key'], ['operation_date' => $data['operation_date']])
+                : $this->costSnapshots->at($product, $operationDate->endOfDay());
+            $totalCost = $costSnapshot === null ? null : BigDecimal::of($costSnapshot->unit_cost)->multipliedBy($quantity)->toScale(2, RoundingMode::HalfUp);
+            $grossProfit = $totalCost === null ? null : $total->minus($totalCost)->toScale(2, RoundingMode::HalfUp);
+            $grossMargin = $grossProfit === null || $total->isZero() ? null : $grossProfit->multipliedBy(100)->dividedBy($total, 4, RoundingMode::HalfUp);
+            $sale = ProductSale::query()->create(['product_id' => $data['product_id'], 'location_id' => $data['location_id'], 'acquirer_id' => $data['acquirer_id'] ?? null, 'card_brand_id' => $data['card_brand_id'] ?? null, 'payment_method' => $method, 'installments' => $data['installments'] ?? null, 'quantity' => (string) $quantity, 'unit_price' => (string) $price, 'total_amount' => (string) $total, 'gross_amount' => (string) $total, 'fee_percentage_snapshot' => $percentage, 'fixed_fee_snapshot' => $fixedFee, 'fee_amount_snapshot' => $financial['fee_amount'], 'net_amount' => $financial['net_amount'], 'payment_fee_id' => $fee?->id, 'product_cost_snapshot_id' => $costSnapshot?->id, 'unit_cost_snapshot' => $costSnapshot?->unit_cost, 'total_cost_snapshot' => $totalCost, 'gross_profit_snapshot' => $grossProfit, 'gross_margin_percentage_snapshot' => $grossMargin, 'operation_date' => $data['operation_date'], 'source' => $source, 'pdv_connection_id' => $data['pdv_connection_id'] ?? null, 'external_sale_id' => $data['external_sale_id'] ?? null, 'external_item_id' => $data['external_item_id'] ?? null, 'external_status' => $data['external_status'] ?? null, 'external_updated_at' => $data['external_updated_at'] ?? null, 'idempotency_key' => $data['idempotency_key'], 'created_by' => $user->id, 'notes' => $data['notes'] ?? null]);
             $this->movements->record(new RecordStockMovementData(productId: $sale->product_id, locationId: $sale->location_id, type: StockMovementType::Sale, quantityDelta: (string) $quantity->negated(), operationDate: $sale->operation_date->toDateString(), idempotencyKey: "sale:{$sale->id}:recorded", createdBy: $user->id, notes: "Venda #{$sale->id}", referenceType: ProductSale::class, referenceId: (string) $sale->id));
 
             return $sale->load(['product.category', 'location', 'creator']);

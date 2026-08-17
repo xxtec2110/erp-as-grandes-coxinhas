@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Http\Requests\IngredientRequest;
 use App\Models\Ingredient;
 use App\Models\IngredientCategory;
+use App\Models\Product;
 use App\Models\Supplier;
 use App\Services\IngredientCatalogService;
+use App\Services\IngredientPriceAnalyticsService;
 use App\Services\UnitConversionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
@@ -40,12 +42,12 @@ class IngredientController extends Controller
             ->with('success', 'Insumo cadastrado. Agora você pode adicionar o primeiro preço.');
     }
 
-    public function show(Ingredient $ingredient, UnitConversionService $conversion): View
+    public function show(Ingredient $ingredient, UnitConversionService $conversion, IngredientPriceAnalyticsService $analytics): View
     {
         $ingredient->load([
             'category',
             'currentPrice.supplier',
-            'prices' => fn ($query) => $query->with('supplier')->latest('effective_date')->latest('id'),
+            'prices' => fn ($query) => $query->with(['supplier', 'purchaseDocument'])->latest('effective_date')->latest('id'),
         ]);
 
         return view('ingredients.show', [
@@ -53,6 +55,12 @@ class IngredientController extends Controller
             'suppliers' => Supplier::query()->where('active', true)->orderBy('name')->get(),
             'purchaseUnits' => $conversion->allowedPurchaseUnits($ingredient->base_unit),
             'conversion' => $conversion,
+            'priceSummary' => $analytics->summary($ingredient),
+            'supplierComparison' => $analytics->suppliers($ingredient),
+            'impactedProducts' => Product::query()->where(fn ($query) => $query
+                ->whereHas('recipe.ingredients', fn ($items) => $items->where('ingredient_id', $ingredient->id))
+                ->orWhereHas('recipe.preparations.preparation.preparationIngredients', fn ($items) => $items->where('ingredient_id', $ingredient->id)))
+                ->orderBy('name')->get(),
         ]);
     }
 

@@ -29,4 +29,14 @@ class Supplier extends Model
     {
         return $this->hasMany(IngredientPrice::class);
     }
+
+    public function ingredientMappings(): HasMany
+    {
+        return $this->hasMany(SupplierIngredientMapping::class);
+    }
+
+    public function purchaseDocuments(): HasMany
+    {
+        return $this->hasMany(PurchaseDocument::class);
+    }
 }

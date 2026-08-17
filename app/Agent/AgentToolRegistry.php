@@ -4,6 +4,7 @@ namespace App\Agent;
 
 use App\Services\AgentAccessManagementService;
 use App\Services\CatalogAgentToolService;
+use App\Services\CostQueryService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
 use App\Services\FinanceQueryService;
@@ -69,10 +70,18 @@ class AgentToolRegistry
             new AgentToolDefinition('finance.payments.list', 'finance.payments.view', true, false, false, ['supplier' => 'string|null', 'account' => 'string|null', 'payer' => 'string|null'], ['items' => 'array'], FinanceQueryService::class),
             new AgentToolDefinition('finance.accounts.list', 'finance.accounts.view', true, false, false, [], ['items' => 'array'], FinanceReportService::class),
             new AgentToolDefinition('finance.reports.summary', 'finance.reports.view', true, false, false, ['period' => 'string'], ['summary' => 'object'], FinanceReportService::class),
-            new AgentToolDefinition('purchases.documents.create', 'purchases.create', true, true, true, ['location_id' => 'integer', 'total_amount' => 'decimal'], ['id' => 'integer'], CreatePurchaseDocumentService::class),
+            new AgentToolDefinition('purchases.documents.create', 'purchases.create', true, true, true, ['location_id' => 'integer', 'supplier_id' => 'integer', 'document_type' => 'string', 'document_number' => 'string|null', 'series' => 'string|null', 'access_key' => 'string|null', 'issue_date' => 'date', 'currency' => 'string', 'gross_amount' => 'decimal|null', 'discount_amount' => 'decimal|null', 'freight_amount' => 'decimal|null', 'other_charges_amount' => 'decimal|null', 'total_amount' => 'decimal', 'items' => 'array', 'received' => 'boolean', 'received_date' => 'date|null'], ['id' => 'integer'], CreatePurchaseDocumentService::class),
             new AgentToolDefinition('purchases.documents.list', 'purchases.view', true, false, false, [], ['items' => 'array'], PurchaseQueryService::class),
             new AgentToolDefinition('purchases.documents.get', 'purchases.view', true, false, false, ['id' => 'integer'], ['document' => 'object'], PurchaseQueryService::class),
             new AgentToolDefinition('purchases.items.list', 'purchases.view', true, false, false, ['document_id' => 'integer'], ['items' => 'array'], PurchaseQueryService::class),
+            new AgentToolDefinition('purchases.history', 'purchases.view', false, false, false, ['location_id' => 'integer|null', 'supplier_id' => 'integer|null', 'ingredient_id' => 'integer|null', 'start_date' => 'date|null', 'end_date' => 'date|null'], ['items' => 'array'], PurchaseQueryService::class),
+            new AgentToolDefinition('costs.ingredients.current', 'ingredients.view', false, false, false, ['ingredient_id' => 'integer'], ['cost' => 'object'], CostQueryService::class),
+            new AgentToolDefinition('costs.ingredients.history', 'ingredients.view', false, false, false, ['ingredient_id' => 'integer'], ['items' => 'array'], CostQueryService::class),
+            new AgentToolDefinition('costs.ingredients.compare_suppliers', 'ingredients.view', false, false, false, ['ingredient_id' => 'integer'], ['items' => 'array'], CostQueryService::class),
+            new AgentToolDefinition('costs.products.current', 'products.view', false, false, false, ['product_id' => 'integer'], ['cost' => 'object'], CostQueryService::class),
+            new AgentToolDefinition('costs.products.history', 'products.view', false, false, false, ['product_id' => 'integer'], ['items' => 'array'], CostQueryService::class),
+            new AgentToolDefinition('costs.products.margin', 'products.view', false, false, false, ['product_id' => 'integer'], ['margin' => 'object'], CostQueryService::class),
+            new AgentToolDefinition('costs.products.margin_history', 'products.view', false, false, false, ['product_id' => 'integer', 'date' => 'date'], ['margin' => 'object'], CostQueryService::class),
             new AgentToolDefinition('purchases.link_supplier', 'purchases.approve', true, true, true, ['document_id' => 'integer', 'supplier_id' => 'integer'], ['document' => 'object'], PurchaseDocumentActionService::class),
             new AgentToolDefinition('purchases.suggest_ingredient_price_update', 'ingredient_prices.update', true, true, true, ['item_id' => 'integer'], ['suggestion' => 'object'], PurchaseDocumentActionService::class),
             new AgentToolDefinition('agent.operations.undo', 'agent.operations.undo', true, true, true, ['operation_type' => 'string', 'operation_id' => 'integer', 'location_id' => 'integer', 'reason' => 'string'], ['id' => 'integer'], UndoLastOperationService::class),

@@ -103,9 +103,17 @@ class AiInterpretationService
             return $result;
         }
         $fields = $result->fields;
-        $fields['items'] = $this->ingredients->matchItems($fields['items']);
+        $fields['items'] = $this->ingredients->matchItems($fields['items'], isset($fields['supplier_id']) ? (int) $fields['supplier_id'] : null);
+        $missing = $result->missingFields;
+        if ($result->tool === 'purchases.documents.create') {
+            foreach ($fields['items'] as $index => $item) {
+                if (! isset($item['ingredient_id'])) {
+                    $missing[] = 'items.'.($index + 1).'.ingredient_id';
+                }
+            }
+        }
 
-        return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, $result->missingFields, $result->sourceType, $result->documentType, $result->summary, $result->usage);
+        return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, array_values(array_unique($missing)), $result->sourceType, $result->documentType, $result->summary, $result->usage);
     }
 
     private function matchProducts(AiInterpretation $result): AiInterpretation
@@ -125,6 +133,9 @@ class AiInterpretationService
 
     private function promotePurpose(AgentAttachment $attachment, ?string $tool): void
     {
+        if (($attachment->metadata['purpose'] ?? null) === 'purchase_import' && $tool === 'purchases.documents.create') {
+            return;
+        }
         $purpose = match ($tool) {
             'finance.payments.record', 'finance.payables.create' => 'finance',
             'purchases.documents.create' => 'purchase',

@@ -9,11 +9,11 @@ use Illuminate\Support\Facades\DB;
 
 class ProductRecipeService
 {
-    public function __construct(private ProductPriceService $prices) {}
+    public function __construct(private ProductPriceService $prices, private ProductCostSnapshotService $costSnapshots) {}
 
     public function save(Product $product, array $data, ?User $user = null, string $source = 'web', ?string $idempotencyKey = null): ProductRecipe
     {
-        return DB::transaction(function () use ($product, $data, $user, $source, $idempotencyKey) {
+        $recipe = DB::transaction(function () use ($product, $data, $user, $source, $idempotencyKey) {
             $ingredients = $data['ingredients'] ?? [];
             $preparations = $data['preparations'] ?? [];
             $sellingPrice = $data['selling_price'] ?? null;
@@ -33,5 +33,8 @@ class ProductRecipeService
 
             return $recipe->refresh();
         });
+        $this->costSnapshots->current($product->fresh(['recipe', 'currentPrice']), 'recipe', (string) $recipe->id);
+
+        return $recipe;
     }
 }
