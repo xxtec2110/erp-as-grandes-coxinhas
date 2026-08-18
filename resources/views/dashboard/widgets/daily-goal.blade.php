@@ -1,0 +1,6 @@
+@php($progress = $data['progress'] === null ? null : min(100, max(0, (float) $data['progress'])))
+<section class="rounded-2xl border border-amber-400/20 bg-gradient-to-r from-amber-400/10 to-orange-500/5 p-5 sm:p-6">
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div><p class="text-xs font-black uppercase tracking-[0.18em] text-amber-400">Meta da unidade</p><h2 class="mt-1 text-xl font-black">{{ $widget['name'] }}</h2><p class="mt-2 text-sm text-stone-400">Vendido no período: <strong class="text-white">{{ \App\Support\DecimalFormatter::format((string) ($data['sold'] ?? 0), 0) }}</strong></p></div>
+        @if($data['target'] === null)<div class="rounded-xl border border-white/10 bg-black/20 px-5 py-4 text-sm text-stone-300">Meta diária ainda não configurada para esta unidade.</div>@else<div class="min-w-72 flex-1 lg:max-w-2xl"><div class="flex justify-between text-sm"><span class="text-stone-300">{{ \App\Support\DecimalFormatter::format((string) ($data['progress'] ?? 0), 1) }}%</span><span class="font-black">Meta {{ \App\Support\DecimalFormatter::format((string) $data['target'], 0) }}</span></div><div class="mt-3 h-4 overflow-hidden rounded-full bg-black/40"><div class="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500" style="width: {{ $progress }}%"></div></div></div>@endif
+    </div>
+</section>

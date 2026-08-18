@@ -65,4 +65,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(UserExternalIdentity::class);
     }
+
+    public function dashboardWidgets(): HasMany
+    {
+        return $this->hasMany(UserDashboardWidget::class);
+    }
 }

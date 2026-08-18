@@ -1,24 +1,40 @@
 @extends('layouts.app')
-@section('title', 'Dashboard')
+@section('title', 'Dashboard de Gestão')
 @section('content')
-<div class="page-header"><div><h1 class="page-title">Dashboard operacional</h1><p class="page-subtitle">Dados oficiais de {{ $startDate }} a {{ $endDate }}.</p></div></div>
-<form method="GET" class="form-card mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
-    <label><span class="form-label">Unidade</span><select class="form-input" name="location_id">@foreach($locations as $item)<option value="{{ $item->id }}" @selected($location?->id === $item->id)>{{ $item->name }}</option>@endforeach</select></label>
-    <label><span class="form-label">Período</span><select class="form-input" name="period"><option value="today">Hoje</option><option value="week" @selected(request('period') === 'week')>Semana</option><option value="fortnight" @selected(request('period') === 'fortnight')>Quinzena</option><option value="month" @selected(request('period') === 'month')>Mês</option><option value="custom" @selected(request('period') === 'custom')>Personalizado</option></select></label>
-    <label><span class="form-label">Início</span><input class="form-input" type="date" name="start_date" value="{{ request('start_date', $startDate) }}"></label>
-    <label><span class="form-label">Fim</span><input class="form-input" type="date" name="end_date" value="{{ request('end_date', $endDate) }}"></label>
-    <button class="btn-primary">Atualizar</button>
-</form>
-@php($metric = fn($key) => collect($summary[$key] ?? [])->sum(fn($value) => (float) $value))
-<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    @foreach([['production','Produção'],['outbound','Vendas / saídas'],['losses','Perdas'],['receipts','Recebimentos']] as [$key,$label])<div class="metric-card"><p class="metric-label">{{ $label }}</p><p class="metric-value">{{ \App\Support\DecimalFormatter::format((string) $metric($key), 0) }}</p></div>@endforeach
-    <div class="metric-card"><p class="metric-label">Faturamento</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['revenue']['brl'] ?? '0', 2) }}</p></div>
-    <div class="metric-card"><p class="metric-label">Taxas comerciais</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format($summary['fees']['brl'] ?? '0', 2) }}</p></div>
-    <div class="metric-card"><p class="metric-label">Transferências em trânsito</p><p class="metric-value">{{ $inTransit }}</p></div>
-    <div class="metric-card"><p class="metric-label">Ordens planejadas</p><p class="metric-value">{{ $plannedOrders }}</p></div><div class="metric-card"><p class="metric-label">Ordens concluídas</p><p class="metric-value">{{ $completedOrders }}</p></div>
-    @if($openPayables !== null)<div class="metric-card"><p class="metric-label">Contas a pagar abertas</p><p class="metric-value">R$ {{ \App\Support\DecimalFormatter::format((string) $openPayables, 2) }}</p></div>@endif
+<div class="overflow-hidden rounded-3xl bg-[#0c0d0f] text-white shadow-2xl ring-1 ring-black/10">
+    <header class="border-b border-white/10 bg-gradient-to-r from-[#111318] to-[#17120b] px-4 py-6 sm:px-7 lg:px-9">
+        <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+            <div class="flex items-center gap-4">
+                <div class="grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-300 to-orange-600 text-xl font-black text-stone-950 shadow-lg shadow-orange-950/40">AG</div>
+                <div>
+                    <p class="text-xs font-black uppercase tracking-[0.28em] text-amber-400">As Grandes Coxinhas</p>
+                    <h1 class="mt-1 text-2xl font-black tracking-tight sm:text-3xl">Dashboard de Gestão</h1>
+                    <p class="mt-1 text-sm text-stone-400">{{ $location?->name ?? 'Nenhuma unidade disponível' }} · {{ $periodLabel }}</p>
+                </div>
+            </div>
+            <form method="GET" action="{{ route('dashboard') }}" class="grid gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label class="block"><span class="mb-1 block text-[10px] font-black uppercase tracking-wider text-stone-400">Unidade</span><select name="location_id" class="w-full rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm text-white"><option value="">Selecione</option>@foreach($locations as $item)<option value="{{ $item->id }}" @selected($location?->id === $item->id)>{{ $item->name }}</option>@endforeach</select></label>
+                <label class="block"><span class="mb-1 block text-[10px] font-black uppercase tracking-wider text-stone-400">Período</span><select name="period" class="w-full rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm text-white" data-dashboard-period><option value="today" @selected(request('period', 'today') === 'today')>Hoje</option><option value="week" @selected(request('period') === 'week')>Semana</option><option value="fortnight" @selected(request('period') === 'fortnight')>Quinzena</option><option value="month" @selected(request('period') === 'month')>Mês</option><option value="custom" @selected(request('period') === 'custom')>Personalizado</option></select></label>
+                <label class="block"><span class="mb-1 block text-[10px] font-black uppercase tracking-wider text-stone-400">Início</span><input name="start_date" type="date" value="{{ request('start_date', $startDate) }}" class="w-full rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm text-white"></label>
+                <div class="flex items-end gap-2"><label class="min-w-0 flex-1"><span class="mb-1 block text-[10px] font-black uppercase tracking-wider text-stone-400">Fim</span><input name="end_date" type="date" value="{{ request('end_date', $endDate) }}" class="w-full rounded-xl border border-white/10 bg-stone-900 px-3 py-2 text-sm text-white"></label><button class="rounded-xl bg-amber-400 px-4 py-2 font-black text-stone-950 transition hover:bg-amber-300">Filtrar</button></div>
+            </form>
+        </div>
+    </header>
+
+    <main class="p-4 sm:p-7 lg:p-9">
+        @if($location === null)
+            <div class="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-6 text-amber-100">Nenhuma unidade ativa está disponível para este usuário.</div>
+        @elseif($widgets === [])
+            <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-center"><p class="text-lg font-black">Nenhum widget disponível</p><p class="mt-2 text-sm text-stone-400">As permissões e preferências atuais não liberam informações para este dashboard.</p></div>
+        @else
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                @foreach($widgets as $widget)
+                    <div data-widget-key="{{ $widget['key'] }}" class="{{ $widget['size'] === 'wide' ? 'md:col-span-2 xl:col-span-4' : '' }}">
+                        @include($widget['view'], ['widget' => $widget, 'data' => $widget['data']])
+                    </div>
+                @endforeach
+            </div>
+        @endif
+    </main>
 </div>
-@if($location?->daily_sales_target)<section class="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5"><p class="metric-label">Meta diária — {{ $location->name }}</p><p class="mt-2 text-2xl font-bold">Meta: {{ \App\Support\DecimalFormatter::format($location->daily_sales_target, 0) }} · Vendidas: {{ \App\Support\DecimalFormatter::format((string) $metric('outbound'), 0) }}</p></section>@endif
-@if(count($ingredientShortages))<section class="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5"><h2 class="text-lg font-bold text-red-900">Insumos com risco de falta</h2><p class="mt-1 text-sm text-red-700">Necessidade calculada pelas ordens de produção planejadas.</p><div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">@foreach($ingredientShortages as $row)<div class="rounded-xl bg-white p-4 shadow-sm"><p class="font-bold">{{ $row['ingredient']->name }}</p><p class="mt-1 text-sm">Disponível: {{ \App\Support\DecimalFormatter::format($row['available'], 3) }} {{ $row['ingredient']->base_unit }}</p><p class="text-sm">Necessário: {{ \App\Support\DecimalFormatter::format($row['required'], 3) }} {{ $row['ingredient']->base_unit }}</p><p class="mt-1 font-semibold text-red-700">Falta: {{ \App\Support\DecimalFormatter::format($row['missing'], 3) }} {{ $row['ingredient']->base_unit }}</p></div>@endforeach</div></section>@endif
-<section class="mt-8"><h2 class="mb-4 text-lg font-bold">Estoque atual — {{ $location?->name }}</h2><div class="table-card"><table class="data-table"><thead><tr><th>Produto</th><th>Saldo</th><th>Situação</th></tr></thead><tbody>@forelse($positions as $row)<tr><td>{{ $row['product']->name }}</td><td>{{ \App\Support\DecimalFormatter::format($row['balance'], $row['product']->stock_unit === 'un' ? 0 : 3) }} {{ $row['product']->stock_unit }}</td><td>{{ $row['situation']->label() }}</td></tr>@empty<tr><td colspan="3" class="empty-state">Nenhum produto cadastrado.</td></tr>@endforelse</tbody></table></div></section>
 @endsection

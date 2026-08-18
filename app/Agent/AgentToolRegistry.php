@@ -7,6 +7,7 @@ use App\Services\CatalogAgentToolService;
 use App\Services\CostQueryService;
 use App\Services\CreatePayableService;
 use App\Services\CreatePurchaseDocumentService;
+use App\Services\DashboardUserVisibilityService;
 use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
 use App\Services\IngredientShortageService;
@@ -48,6 +49,9 @@ class AgentToolRegistry
             new AgentToolDefinition('agent.access.location.grant', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('agent.access.location.revoke', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
             new AgentToolDefinition('agent.access.default_location.set', 'users.manage', false, true, true, ['target_user_name' => 'string', 'location_id' => 'integer'], ['id' => 'integer'], AgentAccessManagementService::class),
+            new AgentToolDefinition('dashboard.user_widgets.list', 'dashboard.permissions.manage', false, false, false, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null'], ['widgets' => 'array'], DashboardUserVisibilityService::class),
+            new AgentToolDefinition('dashboard.user_widgets.update', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null', 'show' => 'array', 'hide' => 'array', 'mode' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
+            new AgentToolDefinition('dashboard.user_widgets.reset', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
             new AgentToolDefinition('stock.positions.list', 'stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], StockPositionService::class),
             new AgentToolDefinition('ingredient_stock.positions.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientStockPositionService::class),
             new AgentToolDefinition('ingredient_stock.shortages.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientShortageService::class),

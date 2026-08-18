@@ -43,7 +43,7 @@ class PendingAgentActionService
         }
         abort_unless($action->status === 'pending' && empty($action->missing_fields), 409);
         $action->update(['status' => 'confirmed', 'confirmed_at' => now()]);
-        $result = $executor->execute($action->tool_name, $action->payload, $user, true, ['channel' => $action->conversation?->channel ?? 'agent']);
+        $result = $executor->execute($action->tool_name, $action->payload, $user, true, ['channel' => $action->conversation?->channel ?? 'agent', 'conversation_id' => $action->agent_conversation_id, 'pending_action_id' => $action->id, 'tool' => $action->tool_name]);
         $action->update(['status' => 'executed', 'executed_at' => now(), 'result' => ['type' => $result::class, 'id' => $result->getKey()]]);
 
         return $action->refresh();

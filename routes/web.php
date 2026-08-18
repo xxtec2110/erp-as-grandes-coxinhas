@@ -9,6 +9,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\CardBrandController;
 use App\Http\Controllers\CostAnalysisController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DashboardUserVisibilityController;
 use App\Http\Controllers\EquipmentBurnerController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\GlpPriceController;
@@ -197,6 +198,10 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('permission:users.manage')->name('users.access.edit');
     Route::put('/configuracoes/usuarios/{user}/acessos', [UserAccessController::class, 'update'])
         ->middleware('permission:users.manage')->name('users.access.update');
+    Route::put('/configuracoes/usuarios/{user}/dashboard', [DashboardUserVisibilityController::class, 'update'])
+        ->middleware('permission:dashboard.permissions.manage')->name('users.dashboard.update');
+    Route::delete('/configuracoes/usuarios/{user}/dashboard', [DashboardUserVisibilityController::class, 'reset'])
+        ->middleware('permission:dashboard.permissions.manage')->name('users.dashboard.reset');
     Route::resource('insumos', IngredientController::class)
         ->parameters(['insumos' => 'ingredient'])
         ->names('ingredients')

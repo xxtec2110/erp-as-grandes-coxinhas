@@ -13,7 +13,7 @@ class AuthorizationAudit extends Model
 
     protected function casts(): array
     {
-        return ['previous_value' => 'array', 'new_value' => 'array'];
+        return ['previous_value' => 'array', 'new_value' => 'array', 'context' => 'array'];
     }
 
     public function actor(): BelongsTo

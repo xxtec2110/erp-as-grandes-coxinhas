@@ -16,6 +16,7 @@ use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AiInterpretationService;
 use App\Services\AuthorizationService;
+use App\Services\DashboardUserVisibilityService;
 use App\Services\RestrictedProductionInteractionService;
 use App\Services\UndoLastOperationService;
 use App\Services\WhatsAppIdentityResolver;
@@ -26,7 +27,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -178,6 +179,9 @@ class ErpAgentService
             throw new AuthorizationException('Operações de escrita não estão liberadas neste canal.');
         }
         $this->authorization->authorize($user, $tool->permission);
+        if (str_starts_with($name, 'dashboard.user_widgets.')) {
+            $input = $this->dashboardVisibility->prepareAgentInput($name, $input, $user);
+        }
         $input = $this->resolveLocation($input, $user);
         if (isset($input['location_id'])) {
             AgentUsageCost::query()->where('idempotency_key', 'ai:'.$message->externalMessageId)
@@ -383,6 +387,7 @@ class ErpAgentService
             'agent.operations.undo' => "⚠️ CANCELAR OPERAÇÃO\n\n{$action->payload['operation_type']} #{$action->payload['operation_id']}\n\nDeseja realmente cancelar?",
             'production.orders.plan', 'production.orders.complete_batch' => $this->productionOrderPreview($action),
             'purchases.documents.create' => $this->purchasePreview($action),
+            'dashboard.user_widgets.update', 'dashboard.user_widgets.reset' => $this->dashboardVisibility->preview($action->tool_name, $action->payload),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
 
@@ -544,6 +549,7 @@ class ErpAgentService
             'purchases.documents.list' => new ErpAgentResponse(true, $this->templates->purchases($result), data: ['count' => $result->count()]),
             'purchases.documents.get' => new ErpAgentResponse(true, $this->templates->purchase($result), data: ['id' => $result->id]),
             'purchases.items.list' => new ErpAgentResponse(true, $this->templates->purchaseItems($result), data: ['count' => $result->count()]),
+            'dashboard.user_widgets.list' => new ErpAgentResponse(true, $this->dashboardVisibility->describe($result), data: $result),
             default => new ErpAgentResponse(true, 'Consulta concluída.'),
         };
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Location;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -18,9 +19,10 @@ class DashboardAccessTest extends TestCase
     public function test_authenticated_user_can_access_dashboard(): void
     {
         $user = User::factory()->create();
+        Location::query()->create(['name' => 'Unidade de teste', 'type' => 'store', 'active' => true]);
 
         $this->actingAs($user)->get(route('dashboard'))
-            ->assertOk()->assertSee('Dashboard operacional')->assertSee('Faturamento')
+            ->assertOk()->assertSee('Dashboard de Gestão')->assertSee('Faturamento bruto confirmado')
             ->assertSee(route('suppliers.index'), false)->assertSee(route('equipment.index'), false)->assertSee(route('glp-products.index'), false);
     }
 }

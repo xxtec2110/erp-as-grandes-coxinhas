@@ -38,6 +38,25 @@ class DeterministicCommandParser
             return ['tool' => 'catalog.preparations.create', 'arguments' => []];
         }
 
+        if (preg_match('/^(.+?)\s+PODE VER (?:A )?META DIARIA(?: E|,)?\s*SABORES MAIS VENDIDOS[.!]?$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.update', 'arguments' => ['target_user_name' => trim($matches[1]), 'show' => ['dashboard.daily_goal', 'dashboard.top_flavors'], 'hide' => []]];
+        }
+        if (preg_match('/^NAO MOSTRA(?: MAIS)? (?:A )?VARIACAO DE PRECO (?:DE|DOS) INSUMOS PARA (?:O |A )?(.+?)[.!]?$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.update', 'arguments' => ['target_user_name' => trim($matches[1]), 'show' => [], 'hide' => ['dashboard.ingredient_price_variation']]];
+        }
+        if (preg_match('/^TIRA (?:O )?FINANCEIRO DO DASHBOARD (?:DO|DA) (.+?)[.!]?$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.update', 'arguments' => ['target_user_name' => trim($matches[1]), 'show' => [], 'hide' => ['dashboard.revenue', 'dashboard.gross_profit', 'dashboard.gross_margin', 'dashboard.flavor_performance', 'dashboard.ingredient_price_variation', 'dashboard.accounts_payable', 'dashboard.upcoming_payables', 'dashboard.recent_purchases', 'dashboard.cash_flow']]];
+        }
+        if (preg_match('/^MOSTRA PARA (?:O |A )?(.+?) APENAS PRODUCAO,? ESTOQUE E ALERTAS[.!]?$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.update', 'arguments' => ['target_user_name' => trim($matches[1]), 'show' => ['dashboard.operational_summary', 'dashboard.stock_balance', 'dashboard.operational_alerts'], 'hide' => [], 'mode' => 'only']];
+        }
+        if (preg_match('/^QUAIS (?:WIDGETS|INFORMACOES)(?: APARECEM(?: HOJE)?| APARECEM HOJE)? (?:NO DASHBOARD )?(?:DO|DA|PARA O|PARA A) (.+?)[?]??$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.list', 'arguments' => ['target_user_name' => trim($matches[1])]];
+        }
+        if (preg_match('/^RESTAURA (?:O )?DASHBOARD PADRAO (?:DO|DA) (.+?)[.!]?$/ui', Str::ascii($trimmed), $matches) === 1) {
+            return ['tool' => 'dashboard.user_widgets.reset', 'arguments' => ['target_user_name' => trim($matches[1])]];
+        }
+
         if (preg_match('/^LIBERA AUDIO PARA (.+)$/', $value, $matches) === 1) {
             return ['tool' => 'agent.access.permission.grant', 'arguments' => ['target_user_name' => trim($matches[1]), 'permission' => 'agent.audio.use']];
         }

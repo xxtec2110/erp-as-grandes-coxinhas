@@ -1,0 +1,6 @@
+@php($items = [['Produzido', $data['production'] ?? '0'], ['Entradas/recebimentos', $data['entries'] ?? '0'], ['Saídas/vendas', $data['outbound'] ?? '0'], ['Perdas', $data['losses'] ?? '0']])
+<section class="rounded-2xl border border-white/10 bg-white/[0.04] p-5 sm:p-6">
+    <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="text-xs font-black uppercase tracking-[0.16em] text-amber-400">Operação</p><h2 class="mt-1 text-xl font-black">{{ $widget['name'] }}</h2></div><p class="text-xs text-stone-400">Movimentos oficiais do período</p></div>
+    <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">@foreach($items as [$label, $value])<div class="rounded-xl border border-white/10 bg-black/20 p-4"><p class="text-xs text-stone-400">{{ $label }}</p><p class="mt-2 text-2xl font-black">{{ \App\Support\DecimalFormatter::format((string) $value, 0) }}</p></div>@endforeach</div>
+    <div class="mt-4 flex flex-wrap gap-4 text-xs font-semibold text-stone-300"><span>Ordens planejadas: <strong class="text-white">{{ $data['planned_orders'] ?? 0 }}</strong></span><span>Concluídas: <strong class="text-white">{{ $data['completed_orders'] ?? 0 }}</strong></span><span>Transferências em trânsito: <strong class="text-white">{{ $data['in_transit'] ?? 0 }}</strong></span></div>
+</section>
