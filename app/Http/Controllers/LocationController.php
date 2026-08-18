@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\LocationRequest;
 use App\Models\Location;
+use App\Services\OperationalLocationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -21,9 +22,9 @@ class LocationController extends Controller
         return view('locations.create');
     }
 
-    public function store(LocationRequest $request): RedirectResponse
+    public function store(LocationRequest $request, OperationalLocationService $locations): RedirectResponse
     {
-        Location::query()->create($request->validated());
+        $locations->create($request->validated());
 
         return redirect()->route('locations.index')->with('success', 'Unidade cadastrada com sucesso.');
     }

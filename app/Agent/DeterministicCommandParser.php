@@ -14,6 +14,38 @@ class DeterministicCommandParser
     {
         $trimmed = trim($text);
         $value = mb_strtoupper(Str::ascii($trimmed));
+        $plain = Str::ascii($trimmed);
+
+        if (preg_match('/^USE (?:A UNIDADE (?:DE )?)?(.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            return ['action' => 'use_location', 'location_name' => trim($matches[1])];
+        }
+        if (preg_match('/^QUAIS UNIDADES (?:O |A )?(.+?) PODE ACESSAR[?]?$/ui', $plain, $matches) === 1) {
+            return ['tool' => 'agent.access.locations.list', 'arguments' => ['target_user_name' => trim($matches[1])]];
+        }
+        if (preg_match('/^LIBERE (?:O |A )?(.+?) PARA (?:A UNIDADE (?:DE )?)?(.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            return ['tool' => 'agent.access.location.grant', 'arguments' => ['target_user_name' => trim($matches[1]), 'location_name' => trim($matches[2])]];
+        }
+        if (preg_match('/^RETIRE O ACESSO (?:DO|DA) (.+?) (?:A|DA|DE) (.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            return ['tool' => 'agent.access.location.revoke', 'arguments' => ['target_user_name' => trim($matches[1]), 'location_name' => trim($matches[2])]];
+        }
+        if (preg_match('/^RETIRE (.+?) (?:DO|DA) (.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            return ['tool' => 'agent.access.location.revoke', 'arguments' => ['location_name' => trim($matches[1]), 'target_user_name' => trim($matches[2])]];
+        }
+        if (preg_match('/^DEIXE (?:O |A )?(.+?) SOMENTE (?:EM|NA UNIDADE (?:DE )?|NA) (.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            return ['tool' => 'agent.access.locations.replace', 'arguments' => ['target_user_name' => trim($matches[1]), 'location_name' => trim($matches[2])]];
+        }
+        if (preg_match('/^(?:ENVIE|ENVIEI|TRANSFIRA)\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+DA\s+(.+?)\s+PARA\s+(.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            $item = $this->products->resolveExactItems([['product_name' => trim($matches[2])]])[0];
+            if (isset($item['product_id'])) {
+                return ['tool' => 'transfers.complete', 'arguments' => [
+                    'quantity' => str_replace(',', '.', $matches[1]),
+                    'product_id' => $item['product_id'],
+                    'source_location_name' => trim($matches[3]),
+                    'destination_location_name' => trim($matches[4]),
+                    'operation_date' => now()->toDateString(),
+                ]];
+            }
+        }
 
         if (in_array($value, ['QUERO CRIAR UM NOVO SABOR DE COXINHA', 'QUERO CRIAR UM NOVO SABOR', 'QUERO CADASTRAR UM NOVO PRODUTO'], true)) {
             return ['tool' => 'catalog.products.create', 'arguments' => []];

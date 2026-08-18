@@ -24,9 +24,16 @@ class PurchaseDocumentController
 {
     public function index(Request $r, AuthorizationService $a): View
     {
-        $ids = $a->accessibleLocations($r->user())->pluck('id');
+        $locations = $a->accessibleLocations($r->user());
+        $requestedId = $r->integer('location_id');
+        if ($r->has('location_id') && ! $locations->contains('id', $requestedId)) {
+            abort(403, 'Você não possui acesso a esta unidade.');
+        }
+        $location = $locations->firstWhere('id', $requestedId)
+            ?? $locations->firstWhere('id', $r->user()->default_location_id)
+            ?? $locations->first();
 
-        return view('purchases.index', ['documents' => PurchaseDocument::query()->with(['supplier', 'location'])->whereIn('location_id', $ids)->latest('issue_date')->paginate(20)]);
+        return view('purchases.index', ['documents' => PurchaseDocument::query()->with(['supplier', 'location'])->when($location, fn ($query) => $query->where('location_id', $location->id))->latest('issue_date')->paginate(20)->withQueryString(), 'locations' => $locations, 'location' => $location]);
     }
 
     public function create(Request $r, AuthorizationService $a): View

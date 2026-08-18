@@ -18,9 +18,11 @@ class StockTransfer extends Model
             'operation_date' => 'date',
             'dispatched_date' => 'date',
             'received_date' => 'date',
+            'reversal_date' => 'date',
             'dispatched_at' => 'datetime',
             'received_at' => 'datetime',
             'cancelled_at' => 'datetime',
+            'reversed_at' => 'datetime',
         ];
     }
 
@@ -42,5 +44,10 @@ class StockTransfer extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function reverser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reversed_by');
     }
 }

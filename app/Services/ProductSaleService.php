@@ -45,7 +45,10 @@ class ProductSaleService
 
                 return $existing;
             }
-            Location::query()->whereKey($data['location_id'])->lockForUpdate()->firstOrFail();
+            $location = Location::query()->whereKey($data['location_id'])->lockForUpdate()->firstOrFail();
+            if ($location->type !== Location::TYPE_STORE) {
+                throw new DomainException('Vendas devem ser registradas em uma unidade do tipo loja.');
+            }
             if (BigDecimal::of($this->balances->balance((int) $data['product_id'], (int) $data['location_id']))->isLessThan($quantity)) {
                 throw new DomainException('Estoque insuficiente para registrar a venda.');
             }

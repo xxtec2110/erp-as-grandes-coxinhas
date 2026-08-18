@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\DispatchStockTransferRequest;
 use App\Http\Requests\ReceiveStockTransferRequest;
+use App\Http\Requests\ReverseStockTransferRequest;
 use App\Http\Requests\StockTransferRequest;
 use App\Models\Product;
 use App\Models\StockTransfer;
@@ -60,6 +61,11 @@ class StockTransferController extends Controller
 
         return view('transfers.show', [
             'transfer' => $transfer->load(['sourceLocation', 'destinationLocation', 'items.product', 'creator']),
+            'canDispatch' => $authorization->allows($request->user(), 'transfers.create', $transfer->source_location_id),
+            'canCancel' => $authorization->allows($request->user(), 'transfers.cancel', $transfer->source_location_id),
+            'canReceive' => $authorization->allows($request->user(), 'transfers.receive', $transfer->destination_location_id),
+            'canReverse' => $authorization->allows($request->user(), 'transfers.cancel', $transfer->source_location_id)
+                && $authorization->allows($request->user(), 'transfers.cancel', $transfer->destination_location_id),
         ]);
     }
 
@@ -69,7 +75,7 @@ class StockTransferController extends Controller
         StockTransferService $service,
         AuthorizationService $authorization,
     ): RedirectResponse {
-        $authorization->authorize($request->user(), 'transfers.create', $transfer->source_location_id);
+        $authorization->authorize($request->user(), 'transfers.cancel', $transfer->source_location_id);
         try {
             $service->dispatch($transfer, $request->validated('dispatched_date'), $request->user()?->getKey());
         } catch (DomainException $exception) {
@@ -113,5 +119,28 @@ class StockTransferController extends Controller
 
         return redirect()->route('transfers.show', $transfer)
             ->with('success', 'Transferência cancelada.');
+    }
+
+    public function reverse(
+        ReverseStockTransferRequest $request,
+        StockTransfer $transfer,
+        StockTransferService $service,
+        AuthorizationService $authorization,
+    ): RedirectResponse {
+        $authorization->authorize($request->user(), 'transfers.cancel', $transfer->source_location_id);
+        $authorization->authorize($request->user(), 'transfers.cancel', $transfer->destination_location_id);
+        try {
+            $service->reverse(
+                $transfer,
+                $request->validated('reversal_date'),
+                $request->validated('reason'),
+                $request->user()?->getKey(),
+            );
+        } catch (DomainException $exception) {
+            throw ValidationException::withMessages(['transfer' => $exception->getMessage()]);
+        }
+
+        return redirect()->route('transfers.show', $transfer)
+            ->with('success', 'Transferência estornada por movimentos compensatórios auditáveis.');
     }
 }

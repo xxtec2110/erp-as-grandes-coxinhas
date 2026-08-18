@@ -42,7 +42,10 @@ class FinanceQueryService
     public function payments(User $user, array $filters = []): Collection
     {
         $ids = $this->authorization->accessibleLocations($user)->pluck('id');
+        if (isset($filters['location_id'])) {
+            $this->authorization->authorize($user, 'finance.payments.view', (int) $filters['location_id']);
+        }
 
-        return Payment::query()->completed()->with(['payable.supplier', 'financialAccount'])->whereHas('payable', fn ($q) => $q->whereIn('location_id', $ids))->when(isset($filters['supplier']), fn ($q) => $q->whereHas('payable.supplier', fn ($s) => $s->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['supplier']).'%'])))->when(isset($filters['account']), fn ($q) => $q->whereHas('financialAccount', fn ($a) => $a->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['account']).'%'])))->when(isset($filters['payer']), fn ($q) => $q->whereRaw('LOWER(paid_by_name) LIKE ?', ['%'.mb_strtolower($filters['payer']).'%']))->get();
+        return Payment::query()->completed()->with(['payable.supplier', 'financialAccount'])->whereHas('payable', fn ($q) => $q->whereIn('location_id', $ids)->when(isset($filters['location_id']), fn ($payables) => $payables->where('location_id', $filters['location_id'])))->when(isset($filters['supplier']), fn ($q) => $q->whereHas('payable.supplier', fn ($s) => $s->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['supplier']).'%'])))->when(isset($filters['account']), fn ($q) => $q->whereHas('financialAccount', fn ($a) => $a->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['account']).'%'])))->when(isset($filters['payer']), fn ($q) => $q->whereRaw('LOWER(paid_by_name) LIKE ?', ['%'.mb_strtolower($filters['payer']).'%']))->get();
     }
 }

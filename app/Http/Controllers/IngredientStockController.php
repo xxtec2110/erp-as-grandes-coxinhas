@@ -21,7 +21,11 @@ class IngredientStockController extends Controller
     public function index(Request $r, AuthorizationService $a, IngredientStockPositionService $s): View
     {
         $locations = $a->accessibleLocations($r->user());
-        $location = $locations->firstWhere('id', $r->integer('location_id')) ?? $locations->firstWhere('id', $r->user()->default_location_id) ?? $locations->first();
+        $requestedId = $r->integer('location_id');
+        if ($r->has('location_id') && ! $locations->contains('id', $requestedId)) {
+            abort(403, 'Você não possui acesso a esta unidade.');
+        }
+        $location = $locations->firstWhere('id', $requestedId) ?? $locations->firstWhere('id', $r->user()->default_location_id) ?? $locations->first();
 
         return view('ingredient-stock.index', ['locations' => $locations, 'location' => $location, 'rows' => $location ? $s->forLocation($location, $r->only('ingredient', 'category_id')) : [], 'categories' => IngredientCategory::query()->orderBy('name')->get(), 'ingredients' => Ingredient::query()->where('active', true)->orderBy('name')->get(), 'key' => (string) Str::uuid()]);
     }

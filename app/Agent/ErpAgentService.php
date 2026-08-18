@@ -12,6 +12,7 @@ use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
+use App\Services\AgentAccessManagementService;
 use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AiInterpretationService;
@@ -23,11 +24,12 @@ use App\Services\WhatsAppIdentityResolver;
 use App\Support\DecimalFormatter;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -157,6 +159,9 @@ class ErpAgentService
             }
         }
         if ($intent === null || ! isset($intent['tool'])) {
+            if (($intent['action'] ?? null) === 'use_location' && isset($intent['location_name'])) {
+                return $this->useLocation($intent['location_name'], $user, $conversation);
+            }
             if (($intent['action'] ?? null) === 'submenu' && isset($intent['submenu'])) {
                 return $this->submenu($intent['submenu'], $user, $message, $conversation);
             }
@@ -182,7 +187,13 @@ class ErpAgentService
         if (str_starts_with($name, 'dashboard.user_widgets.')) {
             $input = $this->dashboardVisibility->prepareAgentInput($name, $input, $user);
         }
+        if ($tool->locationScoped && ! isset($input['location_id'], $input['location_name']) && isset($conversation->context['location_id'])) {
+            $input['location_id'] = $conversation->context['location_id'];
+        }
         $input = $this->resolveLocation($input, $user);
+        if (str_starts_with($name, 'agent.access.')) {
+            $input = $this->accessManagement->prepareAgentInput($name, $input, $user);
+        }
         if (isset($input['location_id'])) {
             AgentUsageCost::query()->where('idempotency_key', 'ai:'.$message->externalMessageId)
                 ->whereNull('location_id')->update(['location_id' => $input['location_id']]);
@@ -388,6 +399,8 @@ class ErpAgentService
             'production.orders.plan', 'production.orders.complete_batch' => $this->productionOrderPreview($action),
             'purchases.documents.create' => $this->purchasePreview($action),
             'dashboard.user_widgets.update', 'dashboard.user_widgets.reset' => $this->dashboardVisibility->preview($action->tool_name, $action->payload),
+            'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.locations.replace' => $this->accessManagement->preview($action->tool_name, $action->payload),
+            'transfers.complete' => $this->transferPreview($action->payload),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
 
@@ -550,6 +563,7 @@ class ErpAgentService
             'purchases.documents.get' => new ErpAgentResponse(true, $this->templates->purchase($result), data: ['id' => $result->id]),
             'purchases.items.list' => new ErpAgentResponse(true, $this->templates->purchaseItems($result), data: ['count' => $result->count()]),
             'dashboard.user_widgets.list' => new ErpAgentResponse(true, $this->dashboardVisibility->describe($result), data: $result),
+            'agent.access.locations.list' => new ErpAgentResponse(true, 'Unidades de '.$result['target_user_name'].': '.(collect($result['locations'])->pluck('name')->implode(', ') ?: 'nenhuma unidade').'.', data: $result),
             default => new ErpAgentResponse(true, 'Consulta concluída.'),
         };
     }
@@ -558,15 +572,31 @@ class ErpAgentService
     {
         $locations = $this->authorization->accessibleLocations($user);
         if (isset($input['location_name'])) {
-            $normalizedName = mb_strtolower(trim((string) $input['location_name']));
+            $normalizedName = $this->normalize((string) $input['location_name']);
             $matches = $locations->filter(function ($location) use ($normalizedName) {
-                $locationName = mb_strtolower(trim($location->name));
+                $locationName = $this->normalize($location->name);
 
                 return str_contains($normalizedName, $locationName) || str_contains($locationName, $normalizedName);
             });
             if ($matches->count() === 1) {
                 $input['location_id'] = $matches->first()->id;
             } unset($input['location_name']);
+        }
+        foreach (['source', 'destination'] as $side) {
+            $nameKey = $side.'_location_name';
+            if (! isset($input[$nameKey])) {
+                continue;
+            }
+            $normalizedName = $this->normalize((string) $input[$nameKey]);
+            $matches = $locations->filter(function ($location) use ($normalizedName) {
+                $locationName = $this->normalize($location->name);
+
+                return str_contains($normalizedName, $locationName) || str_contains($locationName, $normalizedName);
+            });
+            if ($matches->count() === 1) {
+                $input[$side.'_location_id'] = $matches->first()->id;
+            }
+            unset($input[$nameKey]);
         }
         if (! isset($input['location_id']) && $user->default_location_id !== null && $locations->contains('id', $user->default_location_id)) {
             $input['location_id'] = $user->default_location_id;
@@ -576,6 +606,33 @@ class ErpAgentService
         }
 
         return $input;
+    }
+
+    private function useLocation(string $name, User $user, AgentConversation $conversation): ErpAgentResponse
+    {
+        $resolved = $this->resolveLocation(['location_name' => $name], $user);
+        if (! isset($resolved['location_id'])) {
+            return ErpAgentResponse::error('Unidade não encontrada ou ambígua. Informe o nome completo.', 'ambiguous_location');
+        }
+        $location = Location::query()->findOrFail($resolved['location_id']);
+        $conversation->update(['context' => [...($conversation->context ?? []), 'location_id' => $location->id]]);
+
+        return new ErpAgentResponse(true, 'Unidade ativa no Agente: '.$location->name.'.', data: ['location_id' => $location->id]);
+    }
+
+    private function normalize(string $value): string
+    {
+        return Str::squish(Str::lower(Str::ascii($value)));
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function transferPreview(array $payload): string
+    {
+        $source = Location::query()->find($payload['source_location_id'])?->name ?? 'Não informada';
+        $destination = Location::query()->find($payload['destination_location_id'])?->name ?? 'Não informada';
+        $product = Product::query()->find($payload['product_id'])?->name ?? 'Não informado';
+
+        return "TRANSFERÊNCIA DE ESTOQUE\n\nOrigem:\n{$source}\n\nDestino:\n{$destination}\n\nProduto:\n{$product}\n\nQuantidade:\n{$payload['quantity']}\n\nApós confirmação:\n{$source}: -{$payload['quantity']}\n{$destination}: +{$payload['quantity']}\n\nConfirmar?";
     }
 
     private function missing(string $name, array $input): array
@@ -593,7 +650,7 @@ class ErpAgentService
             'catalog.preparations.create' => ['name', 'expected_yield', 'yield_unit', 'total_preparation_time_minutes'],
             'catalog.preparations.update' => ['preparation_id'],
             'catalog.product_recipes.create', 'catalog.product_recipes.update' => ['product_id', 'yield_quantity', 'technical_loss_percentage', 'packaging_cost'],
-            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items', 'received'], default => []
+            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create', 'transfers.complete' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.default_location.set', 'agent.access.locations.replace' => ['target_user_id', 'location_id'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items', 'received'], default => []
         };
 
         return array_values(array_filter($required, fn ($key) => ! isset($input[$key]) || $input[$key] === ''));

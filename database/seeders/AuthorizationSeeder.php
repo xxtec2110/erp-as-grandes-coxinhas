@@ -11,7 +11,7 @@ class AuthorizationSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
-            'pdv.manage' => 'Gerenciar integrações de PDV', 'production.restricted.manage' => 'Gerenciar produção restrita', 'agent.usage.view' => 'Consultar uso do Agente por usuário', 'dashboard.permissions.manage' => 'Gerenciar visibilidade do dashboard por usuário',
+            'pdv.manage' => 'Gerenciar integrações de PDV', 'production.restricted.manage' => 'Gerenciar produção restrita', 'agent.usage.view' => 'Consultar uso do Agente por usuário', 'dashboard.permissions.manage' => 'Gerenciar visibilidade do dashboard por usuário', 'user_locations.manage' => 'Gerenciar unidades autorizadas por usuário', 'user_permissions.manage' => 'Gerenciar perfis e permissões por usuário',
             'production.orders.view' => 'Consultar ordens de produção', 'production.orders.create' => 'Criar ordens de produção', 'production.orders.complete' => 'Concluir ordens de produção', 'production.orders.cancel' => 'Cancelar ordens de produção', 'production.orders.reverse' => 'Reverter ordens concluídas', 'ingredient_losses.create' => 'Registrar perdas de insumos', 'ingredient_stock.adjust' => 'Ajustar estoque de insumos',
             'purchases.receive' => 'Receber mercadoria de compras', 'ingredient_stock.view' => 'Consultar estoque de insumos', 'product_recipes.view' => 'Consultar fichas técnicas de produtos', 'product_recipes.manage' => 'Gerenciar fichas técnicas de produtos', 'dashboard.financial.view' => 'Consultar indicadores financeiros no dashboard',
             'agent.text.use' => 'Usar texto no Agente', 'agent.image.use' => 'Enviar imagens ao Agente', 'agent.document.use' => 'Enviar documentos ao Agente', 'agent.audio.use' => 'Enviar áudio ao Agente', 'agent.free_chat.use' => 'Usar conversa livre com IA',
@@ -31,6 +31,12 @@ class AuthorizationSeeder extends Seeder
         foreach ($roles as $name => $label) {
             Role::query()->updateOrCreate(['name' => $name], ['label' => $label]);
         }
-        Role::query()->where('name', 'administrator')->firstOrFail()->permissions()->sync(Permission::query()->where('name', '!=', 'dashboard.permissions.manage')->pluck('id'));
+        Role::query()->where('name', 'administrator')->firstOrFail()->permissions()->sync(
+            Permission::query()->whereNotIn('name', [
+                'dashboard.permissions.manage',
+                'user_locations.manage',
+                'user_permissions.manage',
+            ])->pluck('id'),
+        );
     }
 }

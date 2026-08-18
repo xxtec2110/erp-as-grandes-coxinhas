@@ -133,7 +133,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/transferencias/{transfer}', [StockTransferController::class, 'show'])->middleware('permission:transfers.view')->name('transfers.show');
     Route::post('/transferencias/{transfer}/expedir', [StockTransferController::class, 'dispatch'])->middleware('permission:transfers.create')->name('transfers.dispatch');
     Route::post('/transferencias/{transfer}/receber', [StockTransferController::class, 'receive'])->middleware('permission:transfers.receive')->name('transfers.receive');
-    Route::post('/transferencias/{transfer}/cancelar', [StockTransferController::class, 'cancel'])->middleware('permission:transfers.create')->name('transfers.cancel');
+    Route::post('/transferencias/{transfer}/cancelar', [StockTransferController::class, 'cancel'])->middleware('permission:transfers.cancel')->name('transfers.cancel');
+    Route::post('/transferencias/{transfer}/estornar', [StockTransferController::class, 'reverse'])->middleware('permission:transfers.cancel')->name('transfers.reverse');
     Route::resource('politicas-estoque', ProductStockPolicyController::class)
         ->parameters(['politicas-estoque' => 'stockPolicy'])
         ->names('stock-policies')

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\FinancialAccount;
 use App\Models\Payable;
 use App\Models\Payment;
 use App\Models\User;
@@ -24,7 +25,12 @@ class RegisterPaymentService
             $existing = Payment::query()->where('idempotency_key', $data['idempotency_key'])->first();
             if ($existing) {
                 return $existing;
-            }$locked = Payable::query()->lockForUpdate()->findOrFail($payable->id);
+            }
+            $account = FinancialAccount::query()->findOrFail($data['financial_account_id']);
+            if (! $account->active || ($account->location_id !== null && $account->location_id !== $payable->location_id)) {
+                throw new DomainException('A conta financeira não pertence à mesma unidade da conta a pagar.');
+            }
+            $locked = Payable::query()->lockForUpdate()->findOrFail($payable->id);
             $remaining = BigDecimal::of($locked->expected_amount)->minus((string) $locked->payments()->where('status', 'completed')->sum('amount'));
             if (BigDecimal::of($data['amount'])->isGreaterThan($remaining)) {
                 throw new DomainException('O pagamento excede o saldo da conta.');

@@ -59,6 +59,9 @@ class AgentToolExecutor
             foreach ($locationIds as $locationId) {
                 $this->authorization->authorize($user, $tool->permission, $locationId);
             }
+            if ($name === 'transfers.complete') {
+                $this->authorization->authorize($user, 'transfers.receive', $input['destination_location_id']);
+            }
         }
 
         return match ($name) {
@@ -66,11 +69,13 @@ class AgentToolExecutor
             'catalog.suppliers.create', 'catalog.suppliers.update', 'catalog.ingredients.create', 'catalog.ingredients.update',
             'catalog.ingredient_prices.add', 'catalog.preparations.create', 'catalog.preparations.update',
             'catalog.product_recipes.create', 'catalog.product_recipes.update' => $this->catalog->execute($name, $input, $user, $context['channel'] ?? 'agent'),
-            'agent.access.permission.grant' => $this->accessManagement->permission($input, $user, true),
-            'agent.access.permission.revoke' => $this->accessManagement->permission($input, $user, false),
-            'agent.access.location.grant' => $this->accessManagement->location($input, $user, true),
-            'agent.access.location.revoke' => $this->accessManagement->location($input, $user, false),
-            'agent.access.default_location.set' => $this->accessManagement->defaultLocation($input, $user),
+            'agent.access.permission.grant' => $this->accessManagement->permission($input, $user, true, $context),
+            'agent.access.permission.revoke' => $this->accessManagement->permission($input, $user, false, $context),
+            'agent.access.locations.list' => $this->accessManagement->locations($input, $user),
+            'agent.access.locations.replace' => $this->accessManagement->replaceLocations($input, $user, $context),
+            'agent.access.location.grant' => $this->accessManagement->location($input, $user, true, $context),
+            'agent.access.location.revoke' => $this->accessManagement->location($input, $user, false, $context),
+            'agent.access.default_location.set' => $this->accessManagement->defaultLocation($input, $user, $context),
             'dashboard.user_widgets.list' => $this->dashboardVisibility->inspect(User::query()->findOrFail($input['target_user_id']), $user),
             'dashboard.user_widgets.update' => $this->dashboardVisibility->updateFromAgent($input, $user, [...$context, 'tool' => $name]),
             'dashboard.user_widgets.reset' => $this->dashboardVisibility->reset(User::query()->findOrFail($input['target_user_id']), $user, 'agent', [...$context, 'tool' => $name], $input['idempotency_key'] ?? null),
@@ -86,6 +91,7 @@ class AgentToolExecutor
             'losses.record' => $this->losses->record($input, $user->id),
             'transfers.list' => $this->transfers->list($user, (int) $input['location_id'], $input['status'] ?? 'recent'),
             'transfers.create' => $this->transferOperations->create($input, $user->id),
+            'transfers.complete' => $this->transferOperations->complete($input, $user->id),
             'transfers.dispatch' => $this->transferOperations->dispatch(StockTransfer::query()->findOrFail($input['transfer_id']), $input['dispatch_date'], $user->id),
             'transfers.receive' => $this->receiveTransfer($input, $user),
             'reports.operational.summary' => $this->operationalSummary->summarize(Location::query()->findOrFail($input['location_id']), ...$this->period($input)),
@@ -95,7 +101,7 @@ class AgentToolExecutor
             'finance.payments.record' => $this->registerPayment->register(Payable::query()->findOrFail($input['payable_id']), collect($input)->except('payable_id')->all(), $user, 'agent'),
             'finance.payments.list' => $this->finance->payments($user, $input),
             'finance.accounts.list' => FinancialAccount::query()->where('active', true)->where(fn ($q) => $q->whereNull('location_id')->orWhereIn('location_id', $this->authorization->accessibleLocations($user)->pluck('id')))->get(),
-            'finance.reports.summary' => $this->reports->summary($this->authorization->accessibleLocations($user)->pluck('id')->all(), ...$this->period($input)),
+            'finance.reports.summary' => $this->reports->summary([$this->locationId($input, $user)], ...$this->period($input)),
             'purchases.documents.list' => $this->purchases->documents($user, isset($input['location_id']) ? (int) $input['location_id'] : null),
             'purchases.documents.get' => $this->purchases->document($user, (int) $input['id']),
             'purchases.documents.create' => $this->createPurchase($input, $user),
@@ -150,5 +156,14 @@ class AgentToolExecutor
             'fortnight' => [now()->subDays(14)->toDateString(), now()->toDateString()],
             default => [now()->startOfMonth()->toDateString(), now()->endOfMonth()->toDateString()],
         };
+    }
+
+    private function locationId(array $input, User $user): int
+    {
+        if (isset($input['location_id'])) {
+            return (int) $input['location_id'];
+        }
+
+        return (int) $this->authorization->accessibleLocations($user)->firstOrFail()->id;
     }
 }

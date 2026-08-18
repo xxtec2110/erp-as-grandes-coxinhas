@@ -6,6 +6,7 @@ use App\Data\Stock\RecordStockMovementData;
 use App\Enums\StockMovementType;
 use App\Enums\StockTransferStatus;
 use App\Models\Location;
+use App\Models\StockMovement;
 use App\Models\StockTransfer;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
@@ -61,6 +62,26 @@ class StockTransferService
             ]);
 
             return $transfer->load(['items.product', 'sourceLocation', 'destinationLocation']);
+        });
+    }
+
+    /** @param array<string, mixed> $data */
+    public function complete(array $data, ?int $userId): StockTransfer
+    {
+        return DB::transaction(function () use ($data, $userId): StockTransfer {
+            $transfer = $this->create($data, $userId);
+            if ($transfer->status === StockTransferStatus::Pending) {
+                $transfer = $this->dispatch($transfer, $data['operation_date'], $userId);
+            }
+            if ($transfer->status === StockTransferStatus::InTransit) {
+                $item = $transfer->items()->firstOrFail();
+                $transfer = $this->receive($transfer, $data['operation_date'], [$item->id => (string) $data['quantity']], $userId);
+            }
+            if ($transfer->status !== StockTransferStatus::Received) {
+                throw new DomainException('A transferência não pôde ser concluída.');
+            }
+
+            return $transfer;
         });
     }
 
@@ -204,6 +225,81 @@ class StockTransferService
             ]);
 
             return $transfer->refresh();
+        });
+    }
+
+    public function reverse(StockTransfer $transfer, string $reversalDate, string $reason, ?int $userId): StockTransfer
+    {
+        return DB::transaction(function () use ($transfer, $reversalDate, $reason, $userId): StockTransfer {
+            $transfer = StockTransfer::query()->with('items.product')->lockForUpdate()->findOrFail($transfer->id);
+
+            if ($transfer->status === StockTransferStatus::Reversed) {
+                if ($transfer->reversal_date?->toDateString() !== $reversalDate || $transfer->reversal_reason !== $reason) {
+                    throw new DomainException('A transferência já foi estornada com outros dados.');
+                }
+
+                return $transfer;
+            }
+
+            if ($transfer->status !== StockTransferStatus::Received) {
+                throw new DomainException('Somente uma transferência recebida pode ser estornada.');
+            }
+
+            Location::query()->whereKey($transfer->source_location_id)->lockForUpdate()->firstOrFail();
+            Location::query()->whereKey($transfer->destination_location_id)->lockForUpdate()->firstOrFail();
+
+            foreach ($transfer->items as $item) {
+                $received = BigDecimal::of($item->quantity_received ?? 0);
+                $balance = BigDecimal::of($this->stockBalances->balance($item->product_id, $transfer->destination_location_id));
+                if ($balance->isLessThan($received)) {
+                    throw new DomainException("Estoque insuficiente de {$item->product->name} no destino para estornar a transferência.");
+                }
+            }
+
+            foreach ($transfer->items as $item) {
+                $dispatch = StockMovement::query()->where('idempotency_key', "transfer:{$transfer->id}:item:{$item->id}:dispatched")->firstOrFail();
+                $this->stockMovements->record(new RecordStockMovementData(
+                    productId: $item->product_id,
+                    locationId: $transfer->source_location_id,
+                    type: StockMovementType::Reversal,
+                    quantityDelta: $item->quantity_sent,
+                    operationDate: $reversalDate,
+                    idempotencyKey: "transfer:{$transfer->id}:item:{$item->id}:reversal:source",
+                    createdBy: $userId,
+                    notes: $reason,
+                    referenceType: StockTransfer::class,
+                    referenceId: (string) $transfer->id,
+                    reversalOfId: $dispatch->id,
+                ));
+
+                $received = BigDecimal::of($item->quantity_received ?? 0);
+                if (! $received->isZero()) {
+                    $receipt = StockMovement::query()->where('idempotency_key', "transfer:{$transfer->id}:item:{$item->id}:received")->firstOrFail();
+                    $this->stockMovements->record(new RecordStockMovementData(
+                        productId: $item->product_id,
+                        locationId: $transfer->destination_location_id,
+                        type: StockMovementType::Reversal,
+                        quantityDelta: (string) $received->negated(),
+                        operationDate: $reversalDate,
+                        idempotencyKey: "transfer:{$transfer->id}:item:{$item->id}:reversal:destination",
+                        createdBy: $userId,
+                        notes: $reason,
+                        referenceType: StockTransfer::class,
+                        referenceId: (string) $transfer->id,
+                        reversalOfId: $receipt->id,
+                    ));
+                }
+            }
+
+            $transfer->update([
+                'status' => StockTransferStatus::Reversed,
+                'reversal_date' => $reversalDate,
+                'reversal_reason' => $reason,
+                'reversed_by' => $userId,
+                'reversed_at' => now(),
+            ]);
+
+            return $transfer->refresh()->load('items.product');
         });
     }
 }

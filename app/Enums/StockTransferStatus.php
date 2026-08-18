@@ -8,6 +8,7 @@ enum StockTransferStatus: string
     case InTransit = 'in_transit';
     case Received = 'received';
     case Cancelled = 'cancelled';
+    case Reversed = 'reversed';
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum StockTransferStatus: string
             self::InTransit => 'Em trânsito',
             self::Received => 'Recebida',
             self::Cancelled => 'Cancelada',
+            self::Reversed => 'Estornada',
         };
     }
 }

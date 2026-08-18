@@ -42,6 +42,9 @@ class PurchaseQueryService
     public function history(User $user, array $filters = []): Collection
     {
         $locations = $this->authorization->accessibleLocations($user)->pluck('id');
+        if (isset($filters['location_id'])) {
+            $this->authorization->authorize($user, 'purchases.view', (int) $filters['location_id']);
+        }
 
         return PurchaseDocument::query()->with(['supplier', 'location', 'items.ingredient'])
             ->whereIn('location_id', $locations)

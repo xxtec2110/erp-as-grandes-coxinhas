@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\ProductSaleRequest;
 use App\Models\Acquirer;
 use App\Models\CardBrand;
+use App\Models\Location;
 use App\Models\Product;
 use App\Models\ProductSale;
 use App\Services\AuthorizationService;
@@ -21,17 +22,23 @@ class ProductSaleController extends Controller
 {
     public function index(Request $request, AuthorizationService $auth, SalesSummaryService $summary): View
     {
-        $locations = $auth->accessibleLocations($request->user());
-        $location = $locations->firstWhere('id', $request->integer('location_id')) ?? $locations->first();
+        $locations = $auth->accessibleLocations($request->user())->where('type', Location::TYPE_STORE)->values();
+        $requestedId = $request->integer('location_id');
+        if ($request->has('location_id') && ! $locations->contains('id', $requestedId)) {
+            abort(403, 'Você não possui acesso a esta unidade comercial.');
+        }
+        $location = $locations->firstWhere('id', $requestedId)
+            ?? $locations->firstWhere('id', $request->user()->default_location_id)
+            ?? $locations->first();
         $start = $request->date('start_date')?->toDateString() ?? now()->startOfMonth()->toDateString();
         $end = $request->date('end_date')?->toDateString() ?? now()->toDateString();
 
-        return view('sales.index', ['sales' => ProductSale::query()->with(['product.category', 'location', 'creator', 'acquirer', 'cardBrand'])->when(! ($request->user()->is_super_admin || $request->user()->all_locations_access), fn ($q) => $q->whereIn('location_id', $locations->pluck('id')))->latest('operation_date')->paginate(20), 'locations' => $locations, 'location' => $location, 'startDate' => $start, 'endDate' => $end, 'summary' => $location ? $summary->summarize($location, $start, $end) : []]);
+        return view('sales.index', ['sales' => ProductSale::query()->with(['product.category', 'location', 'creator', 'acquirer', 'cardBrand'])->when($location, fn ($query) => $query->where('location_id', $location->id))->latest('operation_date')->paginate(20)->withQueryString(), 'locations' => $locations, 'location' => $location, 'startDate' => $start, 'endDate' => $end, 'summary' => $location ? $summary->summarize($location, $start, $end) : []]);
     }
 
     public function create(Request $request, AuthorizationService $auth): View
     {
-        return view('sales.create', ['products' => Product::query()->where('active', true)->with('category')->orderBy('name')->get(), 'locations' => $auth->accessibleLocations($request->user()), 'acquirers' => Acquirer::query()->where('active', true)->orderBy('name')->get(), 'brands' => CardBrand::query()->where('active', true)->orderBy('name')->get(), 'idempotencyKey' => (string) Str::uuid()]);
+        return view('sales.create', ['products' => Product::query()->where('active', true)->with('category')->orderBy('name')->get(), 'locations' => $auth->accessibleLocations($request->user())->where('type', Location::TYPE_STORE), 'acquirers' => Acquirer::query()->where('active', true)->orderBy('name')->get(), 'brands' => CardBrand::query()->where('active', true)->orderBy('name')->get(), 'idempotencyKey' => (string) Str::uuid()]);
     }
 
     public function store(ProductSaleRequest $request, ProductSaleService $service): RedirectResponse

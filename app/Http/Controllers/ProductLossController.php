@@ -20,9 +20,18 @@ class ProductLossController extends Controller
     public function index(Request $request, AuthorizationService $authorization): View
     {
         $locations = $authorization->accessibleLocations($request->user());
+        $requestedId = $request->integer('location_id');
+        if ($request->has('location_id') && ! $locations->contains('id', $requestedId)) {
+            abort(403, 'Você não possui acesso a esta unidade.');
+        }
+        $location = $locations->firstWhere('id', $requestedId)
+            ?? $locations->firstWhere('id', $request->user()->default_location_id)
+            ?? $locations->first();
 
         return view('losses.index', [
-            'losses' => ProductLoss::query()->with(['product', 'location', 'reason', 'creator'])->whereIn('location_id', $locations->pluck('id'))->latest('operation_date')->latest('id')->paginate(20),
+            'losses' => ProductLoss::query()->with(['product', 'location', 'reason', 'creator'])->when($location, fn ($query) => $query->where('location_id', $location->id))->latest('operation_date')->latest('id')->paginate(20)->withQueryString(),
+            'locations' => $locations,
+            'location' => $location,
         ]);
     }
 

@@ -26,10 +26,17 @@ class FinanceController
     public function index(Request $r, AuthorizationService $a, FinanceReportService $reports): View
     {
         $locations = $a->accessibleLocations($r->user());
+        $requestedId = $r->integer('location_id');
+        if ($r->has('location_id') && ! $locations->contains('id', $requestedId)) {
+            abort(403, 'Você não possui acesso a esta unidade.');
+        }
+        $location = $locations->firstWhere('id', $requestedId)
+            ?? $locations->firstWhere('id', $r->user()->default_location_id)
+            ?? $locations->first();
         $start = $r->date('start')?->toDateString() ?? now()->startOfMonth()->toDateString();
         $end = $r->date('end')?->toDateString() ?? now()->toDateString();
 
-        return view('finance.index', ['payables' => Payable::query()->with(['supplier', 'location', 'payments'])->whereIn('location_id', $locations->pluck('id'))->latest('due_date')->paginate(20), 'summary' => $reports->summary($locations->pluck('id')->all(), $start, $end), 'locations' => $locations, 'start' => $start, 'end' => $end]);
+        return view('finance.index', ['payables' => Payable::query()->with(['supplier', 'location', 'payments'])->when($location, fn ($query) => $query->where('location_id', $location->id))->latest('due_date')->paginate(20)->withQueryString(), 'summary' => $reports->summary($location ? [$location->id] : [], $start, $end), 'locations' => $locations, 'location' => $location, 'start' => $start, 'end' => $end]);
     }
 
     public function create(Request $r, AuthorizationService $a): View
@@ -44,9 +51,11 @@ class FinanceController
         return redirect()->route('finance.index')->with('success', 'Conta cadastrada.');
     }
 
-    public function payment(Payable $payable): View
+    public function payment(Payable $payable, Request $request, AuthorizationService $authorization): View
     {
-        return view('finance.payment', ['payable' => $payable->load('supplier'), 'accounts' => FinancialAccount::query()->where('active', true)->get(), 'key' => (string) Str::uuid()]);
+        $authorization->authorize($request->user(), 'finance.payments.create', $payable->location_id);
+
+        return view('finance.payment', ['payable' => $payable->load(['supplier', 'location']), 'accounts' => FinancialAccount::query()->where('active', true)->where(fn ($query) => $query->whereNull('location_id')->orWhere('location_id', $payable->location_id))->get(), 'key' => (string) Str::uuid()]);
     }
 
     public function pay(PaymentRequest $r, Payable $payable, RegisterPaymentService $s): RedirectResponse
@@ -57,7 +66,7 @@ class FinanceController
             throw ValidationException::withMessages(['amount' => $e->getMessage()]);
         }
 
-return redirect()->route('finance.index')->with('success', 'Pagamento registrado.');
+        return redirect()->route('finance.index', ['location_id' => $payable->location_id])->with('success', 'Pagamento registrado.');
     }
 
     public function settings(): View
@@ -83,6 +92,6 @@ return redirect()->route('finance.index')->with('success', 'Pagamento registrado
     {
         CostCenter::query()->create($r->safe()->only(['name', 'location_id', 'active', 'notes']));
 
-        return back()->with('success','Centro cadastrado.');
+        return back()->with('success', 'Centro cadastrado.');
     }
 }
