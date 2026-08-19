@@ -25,6 +25,10 @@ class PreparationCostService
         $missingComponents = [];
         $ingredients = [];
 
+        if ($preparation->preparationIngredients->isEmpty()) {
+            $missingComponents[] = 'Nenhum ingrediente cadastrado';
+        }
+
         foreach ($preparation->preparationIngredients as $item) {
             $normalizedQuantity = $this->unitConversion->normalize(
                 $item->quantity,
@@ -64,6 +68,10 @@ class PreparationCostService
             ...$missingComponents,
             ...$energy['missing_components'],
         ]));
+        if ($preparation->actual_final_quantity === null) {
+            $missingComponents[] = 'Quantidade final real não informada';
+        }
+        $isComplete = $missingPriceCount === 0 && $missingComponents === [];
 
         return [
             'ingredients' => $ingredients,
@@ -78,8 +86,9 @@ class PreparationCostService
             'missing_glp_price_count' => $energy['missing_price_count'],
             'missing_price_count' => $missingPriceCount,
             'missing_components' => $missingComponents,
+            'is_complete' => $isComplete,
             'yield' => $this->calculateYield($preparation),
-            'unit_costs' => $missingPriceCount === 0
+            'unit_costs' => $isComplete
                 ? $this->calculateFinalUnitCosts($preparation, $totalPreparationCost)
                 : null,
         ];

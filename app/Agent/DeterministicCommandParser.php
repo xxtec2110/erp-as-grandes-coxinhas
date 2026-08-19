@@ -46,6 +46,16 @@ class DeterministicCommandParser
                 ]];
             }
         }
+        if (preg_match('/^COLOQUE\s+(?:O\s+)?ESTOQUE\s+INICIAL\s+DE\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+(?:NA|NO|EM)\s+(.+?)[.!]?$/ui', $plain, $matches) === 1) {
+            $item = $this->products->resolveExactItems([['product_name' => trim($matches[2])]])[0];
+            if (isset($item['product_id'])) {
+                return ['tool' => 'stock.opening_balance.record', 'arguments' => [
+                    'quantity' => str_replace(',', '.', $matches[1]),
+                    'product_id' => $item['product_id'],
+                    'location_name' => trim($matches[3]),
+                ]];
+            }
+        }
 
         if (in_array($value, ['QUERO CRIAR UM NOVO SABOR DE COXINHA', 'QUERO CRIAR UM NOVO SABOR', 'QUERO CADASTRAR UM NOVO PRODUTO'], true)) {
             return ['tool' => 'catalog.products.create', 'arguments' => []];
@@ -63,7 +73,7 @@ class DeterministicCommandParser
         if (in_array($value, ['QUERO ADICIONAR UM NOVO FORNECEDOR', 'QUERO CADASTRAR UM FORNECEDOR'], true)) {
             return ['tool' => 'catalog.suppliers.create', 'arguments' => []];
         }
-        if (preg_match('/^(?:CADASTRE|CRIE)(?: O INSUMO)?\s+(.+)$/ui', $trimmed, $matches) === 1 && str_contains($value, 'INSUMO')) {
+        if (preg_match('/^(?:CADASTRE|CRIE)(?: O INSUMO)?\s+([^0-9]+?)[.!]?$/ui', $trimmed, $matches) === 1) {
             return ['tool' => 'catalog.ingredients.create', 'arguments' => ['name' => trim($matches[1])]];
         }
         if (in_array($value, ['QUERO CRIAR UM RECHEIO', 'QUERO CRIAR UM PREPARO'], true)) {

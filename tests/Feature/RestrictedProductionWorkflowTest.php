@@ -8,13 +8,17 @@ use App\Agent\ErpAgentService;
 use App\Models\AgentAttachment;
 use App\Models\AgentEvent;
 use App\Models\AgentUsageCost;
+use App\Models\Ingredient;
 use App\Models\Location;
 use App\Models\Permission;
 use App\Models\Product;
 use App\Models\ProductionSubmission;
 use App\Models\ProductionUserPolicy;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
+use App\Services\IngredientPriceService;
+use App\Services\IngredientStockService;
 use App\Services\ProductionNotificationService;
 use App\Services\ProductionSubmissionService;
 use App\Services\ProductMatchService;
@@ -93,7 +97,7 @@ class RestrictedProductionWorkflowTest extends TestCase
         $this->assertNotNull(ProductionSubmission::query()->firstOrFail()->pendingAction->expires_at);
         $this->assertDatabaseCount('production_orders', 0);
         $this->assertDatabaseCount('stock_movements', 0);
-        $this->assertDatabaseCount('ingredient_stock_movements', 0);
+        $this->assertDatabaseMissing('ingredient_stock_movements', ['type' => 'production_consumption']);
         $this->assertSame($frango->id, data_get(ProductionSubmission::query()->firstOrFail()->interpretation, 'items.0.product_id'));
     }
 
@@ -419,11 +423,18 @@ class RestrictedProductionWorkflowTest extends TestCase
     private function product(string $name, bool $active = true): Product
     {
         $product = Product::query()->firstOrCreate(['name' => $name], ['stock_unit' => 'un', 'active' => $active]);
-        $product->recipe()->firstOrCreate([], [
+        $recipe = $product->recipe()->firstOrCreate([], [
             'yield_quantity' => '1',
             'technical_loss_percentage' => '0',
             'packaging_cost' => '0',
         ]);
+        $ingredient = Ingredient::query()->firstOrCreate(['name' => 'Insumo técnico do teste'], ['base_unit' => 'g', 'active' => true]);
+        $supplier = Supplier::query()->firstOrCreate(['name' => 'Fornecedor técnico do teste'], ['active' => true]);
+        if ($ingredient->currentPrice === null) {
+            app(IngredientPriceService::class)->record($ingredient, ['supplier_id' => $supplier->id, 'purchase_quantity' => '1', 'purchase_unit' => 'kg', 'price_paid' => '10', 'effective_date' => now()->toDateString(), 'is_current' => true]);
+        }
+        $recipe->ingredients()->firstOrCreate(['ingredient_id' => $ingredient->id], ['quantity' => '0.001', 'unit' => 'g']);
+        app(IngredientStockService::class)->record(['ingredient_id' => $ingredient->id, 'location_id' => $this->location->id, 'type' => 'opening_balance', 'quantity_delta' => '1000', 'operation_date' => now()->toDateString(), 'idempotency_key' => 'restricted-test-opening-stock', 'source' => 'test']);
 
         return $product;
     }

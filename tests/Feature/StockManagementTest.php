@@ -26,7 +26,7 @@ class StockManagementTest extends TestCase
         $this->get(route('stock.adjustments.create', [$product, $location]))->assertRedirect(route('login'));
     }
 
-    public function test_authenticated_user_can_record_opening_balance_and_adjustment_from_the_interface(): void
+    public function test_authenticated_user_can_record_adjustment_from_the_interface(): void
     {
         $user = User::factory()->create();
         $product = Product::query()->create(['name' => 'Costela com Queijo', 'stock_unit' => 'un', 'active' => true]);
@@ -35,7 +35,7 @@ class StockManagementTest extends TestCase
 
         $payload = [
             'direction' => 'increase',
-            'movement_type' => StockMovementType::OpeningBalance->value,
+            'movement_type' => StockMovementType::Adjustment->value,
             'quantity' => '150',
             'operation_date' => '2026-08-08',
             'idempotency_key' => $key,

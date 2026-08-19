@@ -11,6 +11,7 @@ class AuthorizationSeeder extends Seeder
     public function run(): void
     {
         $permissions = [
+            'operations.readiness.view' => 'Consultar preparação para operação real', 'stock.opening_balance' => 'Confirmar estoque inicial',
             'pdv.manage' => 'Gerenciar integrações de PDV', 'production.restricted.manage' => 'Gerenciar produção restrita', 'agent.usage.view' => 'Consultar uso do Agente por usuário', 'dashboard.permissions.manage' => 'Gerenciar visibilidade do dashboard por usuário', 'user_locations.manage' => 'Gerenciar unidades autorizadas por usuário', 'user_permissions.manage' => 'Gerenciar perfis e permissões por usuário',
             'production.orders.view' => 'Consultar ordens de produção', 'production.orders.create' => 'Criar ordens de produção', 'production.orders.complete' => 'Concluir ordens de produção', 'production.orders.cancel' => 'Cancelar ordens de produção', 'production.orders.reverse' => 'Reverter ordens concluídas', 'ingredient_losses.create' => 'Registrar perdas de insumos', 'ingredient_stock.adjust' => 'Ajustar estoque de insumos',
             'purchases.receive' => 'Receber mercadoria de compras', 'ingredient_stock.view' => 'Consultar estoque de insumos', 'product_recipes.view' => 'Consultar fichas técnicas de produtos', 'product_recipes.manage' => 'Gerenciar fichas técnicas de produtos', 'dashboard.financial.view' => 'Consultar indicadores financeiros no dashboard',
@@ -36,6 +37,8 @@ class AuthorizationSeeder extends Seeder
                 'dashboard.permissions.manage',
                 'user_locations.manage',
                 'user_permissions.manage',
+                'operations.readiness.view',
+                'stock.opening_balance',
             ])->pluck('id'),
         );
     }

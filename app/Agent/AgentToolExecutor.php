@@ -21,6 +21,7 @@ use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
 use App\Services\IngredientShortageService;
 use App\Services\IngredientStockPositionService;
+use App\Services\OpeningStockService;
 use App\Services\OperationalSummaryService;
 use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
@@ -39,7 +40,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
@@ -80,6 +81,7 @@ class AgentToolExecutor
             'dashboard.user_widgets.update' => $this->dashboardVisibility->updateFromAgent($input, $user, [...$context, 'tool' => $name]),
             'dashboard.user_widgets.reset' => $this->dashboardVisibility->reset(User::query()->findOrFail($input['target_user_id']), $user, 'agent', [...$context, 'tool' => $name], $input['idempotency_key'] ?? null),
             'stock.positions.list' => $this->stockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
+            'stock.opening_balance.record' => $this->openingStock->record($input, $user),
             'ingredient_stock.positions.list' => $this->ingredientStockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
             'ingredient_stock.shortages.list' => $this->ingredientShortages->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.today' => $this->productionQuery->forDate(Location::query()->findOrFail($input['location_id']), $input['date'] ?? now()->toDateString()),

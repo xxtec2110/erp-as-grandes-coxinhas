@@ -12,6 +12,7 @@ use App\Services\FinanceQueryService;
 use App\Services\FinanceReportService;
 use App\Services\IngredientShortageService;
 use App\Services\IngredientStockPositionService;
+use App\Services\OpeningStockService;
 use App\Services\OperationalSummaryService;
 use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
@@ -55,6 +56,7 @@ class AgentToolRegistry
             new AgentToolDefinition('dashboard.user_widgets.update', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null', 'show' => 'array', 'hide' => 'array', 'mode' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
             new AgentToolDefinition('dashboard.user_widgets.reset', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
             new AgentToolDefinition('stock.positions.list', 'stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], StockPositionService::class),
+            new AgentToolDefinition('stock.opening_balance.record', 'stock.opening_balance', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'quantity' => 'decimal', 'operation_date' => 'date', 'notes' => 'string', 'idempotency_key' => 'string'], ['id' => 'integer'], OpeningStockService::class),
             new AgentToolDefinition('ingredient_stock.positions.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientStockPositionService::class),
             new AgentToolDefinition('ingredient_stock.shortages.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientShortageService::class),
             new AgentToolDefinition('production.today', 'production.view', true, false, false, ['location_id' => 'integer', 'date' => 'date'], ['items' => 'array'], ProductionQueryService::class),

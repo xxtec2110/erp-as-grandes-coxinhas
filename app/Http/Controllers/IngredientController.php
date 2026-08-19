@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\Supplier;
 use App\Services\IngredientCatalogService;
 use App\Services\IngredientPriceAnalyticsService;
+use App\Services\IngredientSemanticResolver;
 use App\Services\UnitConversionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
@@ -42,12 +43,13 @@ class IngredientController extends Controller
             ->with('success', 'Insumo cadastrado. Agora você pode adicionar o primeiro preço.');
     }
 
-    public function show(Ingredient $ingredient, UnitConversionService $conversion, IngredientPriceAnalyticsService $analytics): View
+    public function show(Ingredient $ingredient, UnitConversionService $conversion, IngredientPriceAnalyticsService $analytics, IngredientSemanticResolver $semantics): View
     {
         $ingredient->load([
             'category',
             'currentPrice.supplier',
             'prices' => fn ($query) => $query->with(['supplier', 'purchaseDocument'])->latest('effective_date')->latest('id'),
+            'conceptBindings' => fn ($query) => $query->with('concept')->latest('effective_from'),
         ]);
 
         return view('ingredients.show', [
@@ -57,6 +59,8 @@ class IngredientController extends Controller
             'conversion' => $conversion,
             'priceSummary' => $analytics->summary($ingredient),
             'supplierComparison' => $analytics->suppliers($ingredient),
+            'previousPrice' => $ingredient->prices->first(fn ($price) => ! $price->is_current),
+            'semanticResolution' => $semantics->resolve($ingredient->name, $ingredient->brand, filled($ingredient->brand)),
             'impactedProducts' => Product::query()->where(fn ($query) => $query
                 ->whereHas('recipe.ingredients', fn ($items) => $items->where('ingredient_id', $ingredient->id))
                 ->orWhereHas('recipe.preparations.preparation.preparationIngredients', fn ($items) => $items->where('ingredient_id', $ingredient->id)))

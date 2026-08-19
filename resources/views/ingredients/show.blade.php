@@ -6,6 +6,11 @@
         <a class="btn-secondary" href="{{ route('ingredients.edit', $ingredient) }}">Editar insumo</a>
     </div>
 
+    <section class="mb-8 grid gap-4 sm:grid-cols-2">
+        <div class="metric-card"><p class="metric-label">Conceito semântico</p><p class="metric-value text-xl">{{ $semanticResolution['concept_label'] ?? 'Não aplicável' }}</p><p class="mt-1 text-sm text-stone-500">{{ ($semanticResolution['concept_label'] ?? null) ? 'Resolução: '.str_replace('_', ' ', $semanticResolution['resolution_source'] ?? $semanticResolution['status']) : 'Insumo operacional identificado pelo próprio cadastro.' }}</p></div>
+        <div class="metric-card"><p class="metric-label">Preço anterior</p>@if($previousPrice)<p class="metric-value text-xl">R$ {{ \App\Support\DecimalFormatter::format($previousPrice->base_unit_cost, 4) }} / {{ $ingredient->base_unit }}</p><p class="mt-1 text-sm text-stone-500">{{ $previousPrice->supplier->name }} · {{ $previousPrice->effective_date->format('d/m/Y') }}</p>@else<p class="metric-value text-xl">Ainda não existe</p><p class="mt-1 text-sm text-stone-500">O histórico será preservado quando novos preços forem registrados.</p>@endif</div>
+    </section>
+
     @if ($current = $ingredient->currentPrice)
         @php
             $largeUnit = match ($ingredient->base_unit) { 'g' => 'kg', 'ml' => 'l', default => 'un' };

@@ -17,6 +17,10 @@ class ProductRecipeCostService
         $preparations = BigDecimal::zero();
         $missing = 0;
         $missingComponents = [];
+        $hasComponents = $recipe->ingredients->isNotEmpty() || $recipe->preparations->isNotEmpty();
+        if (! $hasComponents) {
+            $missingComponents[] = 'Nenhum componente cadastrado';
+        }
         foreach ($recipe->ingredients as $item) {
             $price = $item->ingredient->currentPrice;
             if ($price === null) {
@@ -47,7 +51,8 @@ class ProductRecipeCostService
         }
         $unit = $direct->dividedBy($recipe->yield_quantity, 8, RoundingMode::HalfUp);
         $price = $recipe->product->currentPrice ? BigDecimal::of($recipe->product->currentPrice->price) : null;
+        $isComplete = $missing === 0 && $hasComponents;
 
-        return ['ingredients_cost' => (string) $ingredients->toScale(8, RoundingMode::HalfUp), 'preparations_cost' => (string) $preparations->toScale(8, RoundingMode::HalfUp), 'packaging_cost' => (string) BigDecimal::of($recipe->packaging_cost)->toScale(8), 'direct_cost' => (string) $direct->toScale(8, RoundingMode::HalfUp), 'unit_cost' => (string) $unit->toScale(8, RoundingMode::HalfUp), 'gross_profit' => $price ? (string) $price->minus($unit)->toScale(4, RoundingMode::HalfUp) : null, 'gross_margin' => $price && $price->isPositive() ? (string) $price->minus($unit)->multipliedBy(100)->dividedBy($price, 4, RoundingMode::HalfUp) : null, 'missing_price_count' => $missing, 'missing_components' => array_values(array_unique($missingComponents))];
+        return ['ingredients_cost' => (string) $ingredients->toScale(8, RoundingMode::HalfUp), 'preparations_cost' => (string) $preparations->toScale(8, RoundingMode::HalfUp), 'packaging_cost' => (string) BigDecimal::of($recipe->packaging_cost)->toScale(8), 'direct_cost' => (string) $direct->toScale(8, RoundingMode::HalfUp), 'unit_cost' => $isComplete ? (string) $unit->toScale(8, RoundingMode::HalfUp) : null, 'partial_unit_cost' => (string) $unit->toScale(8, RoundingMode::HalfUp), 'gross_profit' => $isComplete && $price ? (string) $price->minus($unit)->toScale(4, RoundingMode::HalfUp) : null, 'gross_margin' => $isComplete && $price && $price->isPositive() ? (string) $price->minus($unit)->multipliedBy(100)->dividedBy($price, 4, RoundingMode::HalfUp) : null, 'missing_price_count' => $missing, 'missing_components' => array_values(array_unique($missingComponents)), 'is_complete' => $isComplete];
     }
 }

@@ -20,6 +20,8 @@ use App\Http\Controllers\IngredientPriceController;
 use App\Http\Controllers\IngredientStockController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\LossReasonController;
+use App\Http\Controllers\OpeningStockController;
+use App\Http\Controllers\OperationalReadinessController;
 use App\Http\Controllers\OperationalReportController;
 use App\Http\Controllers\PaymentFeeController;
 use App\Http\Controllers\PdvIntegrationController;
@@ -110,6 +112,12 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/produtos/{product}/ficha-tecnica', [ProductRecipeController::class, 'edit'])->middleware('permission:product_recipes.view')->name('products.recipe.edit');
     Route::put('/produtos/{product}/ficha-tecnica', [ProductRecipeController::class, 'update'])->middleware('permission:product_recipes.manage')->name('products.recipe.update');
     Route::get('/estoque', [StockController::class, 'index'])->middleware('permission:stock.view')->name('stock.index');
+    Route::get('/estoque-inicial', [OpeningStockController::class, 'create'])
+        ->middleware('permission:stock.opening_balance')->name('stock.opening.create');
+    Route::post('/estoque-inicial/previa', [OpeningStockController::class, 'preview'])
+        ->middleware('permission:stock.opening_balance')->name('stock.opening.preview');
+    Route::post('/estoque-inicial/confirmar', [OpeningStockController::class, 'store'])
+        ->middleware('permission:stock.opening_balance')->name('stock.opening.store');
     Route::get('/estoque/{product}/{location}', [StockController::class, 'show'])->middleware('permission:stock.view,location')->name('stock.show');
     Route::get('/estoque/{product}/{location}/ajustar', [StockAdjustmentController::class, 'create'])
         ->middleware('permission:stock.adjust,location')->name('stock.adjustments.create');
@@ -203,6 +211,8 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('permission:dashboard.permissions.manage')->name('users.dashboard.update');
     Route::delete('/configuracoes/usuarios/{user}/dashboard', [DashboardUserVisibilityController::class, 'reset'])
         ->middleware('permission:dashboard.permissions.manage')->name('users.dashboard.reset');
+    Route::get('/configuracoes/preparacao-operacao', OperationalReadinessController::class)
+        ->middleware('permission:operations.readiness.view')->name('operations.readiness');
     Route::resource('insumos', IngredientController::class)
         ->parameters(['insumos' => 'ingredient'])
         ->names('ingredients')

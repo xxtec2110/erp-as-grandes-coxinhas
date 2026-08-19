@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Data\Stock\RecordStockMovementData;
+use App\Enums\StockMovementType;
 use App\Models\Location;
 use App\Models\StockMovement;
 use Brick\Math\BigDecimal;
@@ -31,6 +32,14 @@ class StockMovementService
 
                 if ($existing !== null) {
                     return $this->assertSameMovement($existing, $data, (string) $quantity);
+                }
+
+                if ($data->type === StockMovementType::OpeningBalance
+                    && StockMovement::query()
+                        ->where('product_id', $data->productId)
+                        ->where('location_id', $data->locationId)
+                        ->exists()) {
+                    throw new DomainException('Este produto já possui histórico nesta unidade. Registre um ajuste auditável em vez de outro estoque inicial.');
                 }
 
                 return StockMovement::query()->create([

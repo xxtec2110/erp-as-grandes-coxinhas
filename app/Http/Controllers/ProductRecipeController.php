@@ -8,6 +8,7 @@ use App\Models\Preparation;
 use App\Models\Product;
 use App\Services\ProductRecipeCostService;
 use App\Services\ProductRecipeService;
+use DomainException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -23,7 +24,11 @@ class ProductRecipeController extends Controller
 
     public function update(ProductRecipeRequest $request, Product $product, ProductRecipeService $service): RedirectResponse
     {
-        $service->save($product, $request->validated(), $request->user());
+        try {
+            $service->save($product, $request->validated(), $request->user());
+        } catch (DomainException $exception) {
+            return back()->withErrors(['recipe' => $exception->getMessage()])->withInput();
+        }
 
         return back()->with('success', 'Ficha técnica atualizada.');
     }

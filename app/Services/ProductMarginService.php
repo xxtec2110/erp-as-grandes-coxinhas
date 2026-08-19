@@ -46,7 +46,7 @@ class ProductMarginService
             return compact('product', 'sellingPrice', 'status') + [
                 'snapshot' => null,
                 'unit_cost' => null,
-                'partial_unit_cost' => $partial['unit_cost'] ?? null,
+                'partial_unit_cost' => $partial['partial_unit_cost'] ?? null,
                 'missing_components' => $partial['missing_components'] ?? [],
                 'gross_profit' => null,
                 'gross_margin_percentage' => null,

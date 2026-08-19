@@ -22,7 +22,7 @@ class ProductCostSnapshotService
             return null;
         }
         $calculation = $this->costs->calculate($recipe);
-        if ($calculation['missing_price_count'] > 0) {
+        if (! $calculation['is_complete']) {
             return null;
         }
 

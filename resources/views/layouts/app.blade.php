@@ -22,13 +22,19 @@
                         <details class="group relative">
                             <summary @class([
                                 'flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition marker:hidden sm:px-4',
-                                'border-amber-300 bg-amber-50 text-amber-900' => request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
-                                'border-stone-300 bg-white text-stone-700 hover:bg-stone-50' => ! request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*']),
+                                'border-amber-300 bg-amber-50 text-amber-900' => request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*', 'operations.*', 'stock.opening.*']),
+                                'border-stone-300 bg-white text-stone-700 hover:bg-stone-50' => ! request()->routeIs(['ingredient-categories.*', 'product-categories.*', 'users.*', 'agent.*', 'pdv.*', 'suppliers.*', 'equipment.*', 'glp-products.*', 'loss-reasons.*', 'operations.*', 'stock.opening.*']),
                             ])>
                                 Configurações
                                 <span aria-hidden="true" class="text-xs transition group-open:rotate-180">▼</span>
                             </summary>
                             <nav class="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-stone-200 bg-white p-2 shadow-xl" aria-label="Configurações">
+                                @if ($authorization->allows(auth()->user(), 'operations.readiness.view'))
+                                    <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('operations.readiness') }}">Preparação para operação</a>
+                                @endif
+                                @if ($authorization->allows(auth()->user(), 'stock.opening_balance'))
+                                    <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('stock.opening.create') }}">Estoque inicial</a>
+                                @endif
                                 @if ($authorization->allows(auth()->user(), 'suppliers.view'))
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('ingredient-categories.index') }}">Categorias de insumos</a>
                                 @endif

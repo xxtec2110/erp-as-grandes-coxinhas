@@ -18,8 +18,8 @@ class ProductionRecipeSnapshotService
             throw new DomainException("O produto {$product->name} não possui ficha técnica.");
         }
         $cost = $this->costs->calculate($recipe);
-        if ($cost['missing_price_count'] > 0) {
-            throw new DomainException("A ficha técnica de {$product->name} possui componentes sem preço atual.");
+        if (! $cost['is_complete']) {
+            throw new DomainException("A ficha técnica de {$product->name} está incompleta ou possui componentes sem preço atual.");
         }
         $yield = BigDecimal::of($recipe->yield_quantity);
         $consumption = [];

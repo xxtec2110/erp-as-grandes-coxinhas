@@ -234,6 +234,9 @@ class ErpAgentService
                 if ($name === 'purchases.documents.create') {
                     return new ErpAgentResponse(true, 'A prévia foi preservada, mas ainda precisa dos vínculos: '.implode(', ', $missing).'.', 'confirmation', $action->payload, pendingAction: ['id' => $action->id]);
                 }
+                if ($name === 'stock.opening_balance.record') {
+                    return new ErpAgentResponse(true, 'Qual é a data real da contagem? Responda no formato AAAA-MM-DD.', pendingAction: ['id' => $action->id]);
+                }
 
                 return new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
             }
@@ -274,6 +277,20 @@ class ErpAgentService
         }
         if ($this->catalogWorkflow->supports($action->tool_name)) {
             return $this->catalogWorkflow->collect($action, $text, $user);
+        }
+        if ($action->tool_name === 'stock.opening_balance.record') {
+            if (in_array('operation_date', $action->missing_fields ?? [], true) && preg_match('/^(\d{4}-\d{2}-\d{2})$/', trim($text), $matches) === 1) {
+                $payload = [...$action->payload, 'operation_date' => $matches[1]];
+                $action = $this->pending->merge($action, $user, ['operation_date' => $matches[1]], $this->missing($action->tool_name, $payload));
+
+                return empty($action->missing_fields) ? $this->confirmation($action) : new ErpAgentResponse(true, 'Informe a justificativa/origem da contagem real.', pendingAction: ['id' => $action->id]);
+            }
+            if (in_array('notes', $action->missing_fields ?? [], true) && trim($text) !== '') {
+                $payload = [...$action->payload, 'notes' => trim($text)];
+                $action = $this->pending->merge($action, $user, ['notes' => trim($text)], $this->missing($action->tool_name, $payload));
+
+                return empty($action->missing_fields) ? $this->confirmation($action) : new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $action->missing_fields).'.', pendingAction: ['id' => $action->id]);
+            }
         }
         if (preg_match('/(?:VALOR CORRETO|CORRIGIR(?: PARA)?)\D*([0-9]+(?:[.,][0-9]+)*)/ui', $text, $matches) === 1) {
             $field = array_key_exists('expected_amount', $action->payload) ? 'expected_amount' : (array_key_exists('amount', $action->payload) ? 'amount' : null);
@@ -401,6 +418,7 @@ class ErpAgentService
             'dashboard.user_widgets.update', 'dashboard.user_widgets.reset' => $this->dashboardVisibility->preview($action->tool_name, $action->payload),
             'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.locations.replace' => $this->accessManagement->preview($action->tool_name, $action->payload),
             'transfers.complete' => $this->transferPreview($action->payload),
+            'stock.opening_balance.record' => $this->openingStockPreview($action->payload),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
 
@@ -635,6 +653,15 @@ class ErpAgentService
         return "TRANSFERÊNCIA DE ESTOQUE\n\nOrigem:\n{$source}\n\nDestino:\n{$destination}\n\nProduto:\n{$product}\n\nQuantidade:\n{$payload['quantity']}\n\nApós confirmação:\n{$source}: -{$payload['quantity']}\n{$destination}: +{$payload['quantity']}\n\nConfirmar?";
     }
 
+    /** @param array<string, mixed> $payload */
+    private function openingStockPreview(array $payload): string
+    {
+        $location = Location::query()->find($payload['location_id'])?->name ?? 'Não informada';
+        $product = Product::query()->find($payload['product_id'])?->name ?? 'Não informado';
+
+        return "ESTOQUE INICIAL\n\nProduto:\n{$product}\n\nUnidade/localização:\n{$location}\n\nQuantidade:\n{$payload['quantity']}\n\nData real:\n{$payload['operation_date']}\n\nJustificativa:\n{$payload['notes']}\n\nSerá criado um movimento oficial, imutável e idempotente. Confirmar?";
+    }
+
     private function missing(string $name, array $input): array
     {
         $required = match ($name) {
@@ -650,6 +677,7 @@ class ErpAgentService
             'catalog.preparations.create' => ['name', 'expected_yield', 'yield_unit', 'total_preparation_time_minutes'],
             'catalog.preparations.update' => ['preparation_id'],
             'catalog.product_recipes.create', 'catalog.product_recipes.update' => ['product_id', 'yield_quantity', 'technical_loss_percentage', 'packaging_cost'],
+            'stock.opening_balance.record' => ['product_id', 'location_id', 'quantity', 'operation_date', 'notes'],
             'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create', 'transfers.complete' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.default_location.set', 'agent.access.locations.replace' => ['target_user_id', 'location_id'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items', 'received'], default => []
         };
 

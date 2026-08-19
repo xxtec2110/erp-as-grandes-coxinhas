@@ -13,7 +13,7 @@
         @if ($selectedProduct && $selectedLocation)
             <div class="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 sm:flex sm:items-center sm:justify-between">
                 <div><p class="text-sm text-stone-600">{{ $selectedProduct->name }} · {{ $selectedLocation->name }}</p><p class="mt-1 text-2xl font-bold">{{ \App\Support\DecimalFormatter::format($balance, $selectedProduct->stock_unit === 'un' ? 0 : 3) }} {{ $selectedProduct->stock_unit }}</p></div>
-                <div class="mt-3 flex gap-2 sm:mt-0"><a class="btn-secondary" href="{{ route('stock.show', [$selectedProduct, $selectedLocation]) }}">Ver histórico</a><a class="btn-primary" href="{{ route('stock.adjustments.create', [$selectedProduct, $selectedLocation]) }}">Registrar ajuste</a></div>
+                <div class="mt-3 flex flex-wrap gap-2 sm:mt-0"><a class="btn-secondary" href="{{ route('stock.show', [$selectedProduct, $selectedLocation]) }}">Ver histórico</a><a class="btn-primary" href="{{ route('stock.adjustments.create', [$selectedProduct, $selectedLocation]) }}">Registrar ajuste</a>@if(app(\App\Services\AuthorizationService::class)->allows(auth()->user(), 'stock.opening_balance'))<a class="btn-secondary" href="{{ route('stock.opening.create', ['product_id' => $selectedProduct->id, 'location_id' => $selectedLocation->id]) }}">Informar estoque inicial</a>@endif</div>
             </div>
         @elseif (request()->hasAny(['product_id', 'location_id']))
             <p class="mt-4 text-sm font-medium text-red-700">Selecione um produto e uma unidade ativos.</p>

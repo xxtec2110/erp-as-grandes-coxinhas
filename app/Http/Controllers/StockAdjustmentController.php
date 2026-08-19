@@ -23,9 +23,7 @@ class StockAdjustmentController extends Controller
             'location' => $location,
             'balance' => $balances->balance($product, $location),
             'idempotencyKey' => (string) Str::uuid(),
-            'movementType' => $product->stockMovements()->whereBelongsTo($location)->exists()
-                ? StockMovementType::Adjustment
-                : StockMovementType::OpeningBalance,
+            'movementType' => StockMovementType::Adjustment,
         ]);
     }
 
@@ -41,7 +39,7 @@ class StockAdjustmentController extends Controller
         $movements->record(new RecordStockMovementData(
             productId: $product->getKey(),
             locationId: $location->getKey(),
-            type: StockMovementType::from($data['movement_type']),
+            type: StockMovementType::Adjustment,
             quantityDelta: (string) ($data['direction'] === 'decrease' ? $quantity->negated() : $quantity),
             operationDate: $data['operation_date'],
             idempotencyKey: $data['idempotency_key'],
