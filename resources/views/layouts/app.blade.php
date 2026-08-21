@@ -53,7 +53,7 @@
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.simulator') }}">Simulador do Agente</a>
                                     <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('agent.usage') }}">Uso do Agente</a>
                                     @if ($authorization->allows(auth()->user(), 'pdv.manage'))
-                                        <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('pdv.index') }}">Integrações · PDV / GrandChef</a>
+                                        <a class="block rounded-lg px-3 py-2.5 text-sm font-semibold text-stone-700 hover:bg-amber-50 hover:text-amber-900" href="{{ route('pdv.index') }}">Integrações · GrandChef</a>
                                     @endif
                                 @endif
                                 @if ($authorization->allows(auth()->user(), 'payment_fees.view'))
@@ -120,6 +120,11 @@
             @if (session('success'))
                 <div class="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900" role="status">
                     {{ session('success') }}
+                </div>
+            @endif
+            @if (session('error'))
+                <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-900" role="alert">
+                    {{ session('error') }}
                 </div>
             @endif
 

@@ -12,14 +12,16 @@ use Throwable;
 
 class PdvSyncService
 {
-    public function __construct(private PdvProviderManager $providers, private PdvInboundService $inbound, private PdvSaleImportService $imports, private PdvIntegrationEventService $events) {}
+    public function __construct(private PdvProviderManager $providers, private PdvInboundService $inbound, private PdvSaleImportService $imports, private PdvIntegrationEventService $events, private PdvConnectionAccessService $access) {}
 
     public function sync(PdvConnection $connection, User $user, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
     {
         if (! config('pdv.enabled') || ! config('pdv.sync_enabled') || ! $connection->enabled) {
             throw new IntegrationNotConfiguredException('Sincronização de PDV desativada.');
         }
-        $checkpoint = PdvSyncCheckpoint::query()->firstOrCreate(['pdv_connection_id' => $connection->id, 'location_id' => null, 'stream' => 'sales']);
+        $location = $this->access->assertOperationalScope($connection);
+        $this->access->authorizeConnection($user, $connection);
+        $checkpoint = PdvSyncCheckpoint::query()->firstOrCreate(['pdv_connection_id' => $connection->id, 'location_id' => $location->id, 'stream' => 'sales']);
         $checkpoint->update(['last_attempt_at' => now()]);
         $started = hrtime(true);
         $this->events->record('sync_started', $connection, user: $user, status: 'running');

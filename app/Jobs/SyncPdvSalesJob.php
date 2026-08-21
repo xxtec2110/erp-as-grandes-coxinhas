@@ -25,6 +25,10 @@ class SyncPdvSalesJob implements ShouldQueue
         if (! $user) {
             return;
         }
-        PdvConnection::query()->where('enabled', true)->each(fn ($connection) => $sync->sync($connection, $user));
+        PdvConnection::query()
+            ->where('enabled', true)
+            ->whereNotNull('location_id')
+            ->whereHas('location', fn ($query) => $query->where('active', true))
+            ->each(fn ($connection) => $sync->sync($connection, $user));
     }
 }

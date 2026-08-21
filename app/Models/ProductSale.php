@@ -49,6 +49,11 @@ class ProductSale extends Model
         return $this->belongsTo(PdvConnection::class);
     }
 
+    public function pdvOrderItem(): BelongsTo
+    {
+        return $this->belongsTo(PdvOrderItem::class);
+    }
+
     public function costSnapshot(): BelongsTo
     {
         return $this->belongsTo(ProductCostSnapshot::class, 'product_cost_snapshot_id');

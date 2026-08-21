@@ -14,14 +14,20 @@ use Illuminate\Support\Facades\DB;
 
 class PdvSaleImportService
 {
-    public function __construct(private ProductSaleService $sales, private PdvIntegrationEventService $events) {}
+    public function __construct(private ProductSaleService $sales, private PdvIntegrationEventService $events, private PdvConnectionAccessService $access) {}
 
     /** @return array{status:string,sales:array<int,ProductSale>,missing:array<int,string>} */
     public function import(PdvConnection $connection, ExternalSaleData $data, User $user, ?PdvInboundEvent $inbound = null): array
     {
         return DB::transaction(function () use ($connection, $data, $user, $inbound): array {
+            $connectionLocation = $this->access->assertOperationalScope($connection);
+            $this->access->authorizeConnection($user, $connection);
             $location = PdvLocationMapping::query()->whereBelongsTo($connection, 'connection')->where('external_location_id', $data->externalLocationId)->where('status', 'confirmed')->first()?->location;
             $missing = $location ? [] : ['location:'.$data->externalLocationId];
+            if ($location !== null && $location->id !== $connectionLocation->id) {
+                $missing[] = 'location_scope_mismatch';
+                $location = null;
+            }
             $mapped = [];
             foreach ($data->items as $item) {
                 $mapping = PdvProductMapping::query()->whereBelongsTo($connection, 'connection')->where('external_product_id', $item->externalProductId)->where('status', 'confirmed')->first();

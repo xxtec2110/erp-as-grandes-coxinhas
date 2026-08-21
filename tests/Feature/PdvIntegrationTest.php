@@ -43,6 +43,7 @@ class PdvIntegrationTest extends TestCase
         $this->location = Location::query()->create(['name' => 'Loja', 'type' => 'store', 'active' => true]);
         $this->product = Product::query()->create(['name' => 'Frango', 'stock_unit' => 'un', 'active' => true]);
         $this->connection = PdvConnection::query()->firstOrFail();
+        $this->connection->update(['location_id' => $this->location->id]);
         PdvLocationMapping::query()->create(['pdv_connection_id' => $this->connection->id, 'external_location_id' => 'L1', 'external_name' => 'Loja 1', 'location_id' => $this->location->id, 'status' => 'confirmed']);
         PdvProductMapping::query()->create(['pdv_connection_id' => $this->connection->id, 'external_product_id' => 'P1', 'external_name' => 'Frango', 'product_id' => $this->product->id, 'status' => 'confirmed', 'match_source' => 'admin']);
         app(StockMovementService::class)->record(new RecordStockMovementData($this->product->id, $this->location->id, StockMovementType::OpeningBalance, '100', '2026-08-14', 'pdv-opening'));
@@ -96,7 +97,7 @@ class PdvIntegrationTest extends TestCase
     public function test_admin_panel_is_protected_and_webhook_stays_off(): void
     {
         $this->get(route('pdv.index'))->assertRedirect(route('login'));
-        $this->actingAs($this->admin)->get(route('pdv.index'))->assertOk()->assertSee('AGUARDANDO CREDENCIAIS/DOCUMENTAÇÃO');
+        $this->actingAs($this->admin)->get(route('pdv.index'))->assertOk()->assertSee('GrandChef por unidade');
         $this->postJson(route('webhooks.pdv.receive', ['provider' => 'grandchef']), [])->assertNotFound();
     }
 
@@ -104,6 +105,6 @@ class PdvIntegrationTest extends TestCase
     {
         $at = CarbonImmutable::parse('2026-08-14 12:00:00', 'America/Sao_Paulo');
 
-        return new ExternalSaleData('grandchef','S1','1001','L1',$status,$at,$at,$at,'20.00','0.00','0.00','0.00','20.00',[new ExternalSaleItemData('I1',$product,null,'Frango','2.000000','10.0000','0.00','20.00')]);
+        return new ExternalSaleData('grandchef', 'S1', '1001', 'L1', $status, $at, $at, $at, '20.00', '0.00', '0.00', '0.00', '20.00', [new ExternalSaleItemData('I1', $product, null, 'Frango', '2.000000', '10.0000', '0.00', '20.00')]);
     }
 }

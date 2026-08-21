@@ -51,6 +51,11 @@ class Location extends Model
         return $this->hasMany(ProductLoss::class);
     }
 
+    public function pdvConnections(): HasMany
+    {
+        return $this->hasMany(PdvConnection::class);
+    }
+
     public function typeLabel(): string
     {
         return match ($this->type) {

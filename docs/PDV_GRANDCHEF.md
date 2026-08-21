@@ -1,58 +1,89 @@
 # Integração PDV / GrandChef
 
-## Estado
+## Estado atual
 
-A integração real está desativada. O ERP não contém endpoint, autenticação, token, assinatura ou payload supostamente oficial do GrandChef. `GrandChefPdvProvider` declara as capacidades como `unknown` e responde `not_configured` até recebermos documentação oficial.
+A fundação GrandChef é multiunidade e exclusivamente read-only até a importação oficial ser autorizada. Cada loja possui sua própria `PdvConnection`, com endpoint em `configuration` e Bearer token em `encrypted_credentials` (cast criptografado e atributo oculto).
 
-Flags seguras: `PDV_ENABLED=false`, `PDV_SYNC_ENABLED=false` e `PDV_WEBHOOK_ENABLED=false`.
+O endpoint, a autenticação Bearer e o contrato GraphQL foram validados diretamente no schema real da Unidade Ibirá por introspecção mínima read-only. `GrandChefQueryContract` está ligado a `GrandChefValidatedQueryContract`, que contém somente as queries e os campos efetivamente confirmados.
 
-## Arquitetura
+## Escopo por unidade
 
-- `PdvProviderInterface` isola o domínio do fornecedor e prevê consulta de vendas, atualizações, cancelamentos, catálogos, health e normalização futura de webhook.
-- `GrandChefPdvProvider` é deliberadamente não operacional. `FakePdvProvider` permite testes sem rede.
-- `ExternalSaleData`, `ExternalSaleItemData` e `ExternalSalePaymentData` são o contrato normalizado; valores monetários e quantidades permanecem strings decimais.
-- `PdvInboundEvent` é a inbox idempotente. O payload é sanitizado, limitado e nunca é despejado integralmente em logs.
-- `PdvSyncCheckpoint` guarda cursor opaco por conexão, unidade e stream. O sincronizador aceita intervalo para backfill e só avança o checkpoint após sucesso.
-- Mappings confirmados ligam IDs externos a `Location`, `Product` e forma de pagamento. Nenhum produto é criado automaticamente e sugestões aproximadas nunca são confirmadas sozinhas.
-- `PdvSaleImportService` usa exclusivamente `ProductSaleService`; este continua sendo a fonte oficial da venda e cria o único `StockMovement` oficial.
-- A chave `pdv:{connection}:{external_sale}:{external_item}` e constraints PostgreSQL impedem duplicar venda, estoque e faturamento em webhook, polling ou retry.
-- Cancelamentos não apagam venda ou movimento: `ProductSaleService::reverse` cria movimento inverso idempotente e registra o cancelamento.
+- `pdv_connections.location_id` é a unidade oficial da conexão.
+- Existe no máximo uma conexão do mesmo provider por unidade.
+- Conexões legadas sem unidade são preservadas, ficam visíveis apenas para Admin Master e não podem ser ativadas, testadas ou sincronizadas sem vínculo explícito.
+- Endpoint, credencial, mappings, inbox, eventos, checkpoints e IDs externos sempre pertencem à `PdvConnection`.
+- Não existe fallback global de endpoint ou token e não se usa `PdvConnection::first()` para resolver integração.
+- O backend exige `pdv.manage` e acesso à unidade; Admin Master mantém acesso global.
+- Uma unidade de produção não recebe GrandChef automaticamente.
 
-## Push, polling e backfill
+## Administração web
 
-O endpoint genérico de webhook retorna 404 enquanto `PDV_WEBHOOK_ENABLED=false`. Mesmo habilitado, retorna 501 até que a autenticação/assinatura oficial seja implementada. Polling também permanece desligado e só é agendado quando há intervalo positivo. A futura implementação deve registrar rapidamente a inbox, enfileirar processamento e aplicar retry/backoff apenas a erros transitórios. Erros de mapping ficam em `waiting_mapping` e podem ser reprocessados.
+Área canônica: `Configurações → Integrações → GrandChef`.
 
-## Segurança e operação
+A listagem mostra somente unidades acessíveis, status, ativação, credencial configurada, última tentativa, última conexão bem-sucedida e erro sanitizado. A edição nunca devolve o Bearer ao HTML:
 
-HTTPS, validação de assinatura, replay protection e limites reais serão implementados conforme a documentação do fornecedor. Segredos futuros ficam fora do Git; se persistidos na conexão, usam cast criptografado. O `/up` do ERP não depende do PDV: o painel possui health próprio (`healthy`, `degraded`, `offline`, `not_configured`). Não há escrita de volta no GrandChef.
+- token vazio preserva a credencial atual;
+- novo token substitui explicitamente a credencial;
+- ativação exige loja ativa, endpoint HTTPS e token;
+- conexão vinculada não pode ser movida para outra unidade.
 
-## Produção e relatórios
+Mappings de unidade são confinados à unidade da conexão. Produtos externos só contam como coxinha após mapping humano confirmado com um `Product` da categoria oficial `Coxinhas`. Não há confirmação automática por fuzzy matching.
 
-Vendas importadas entram nas tabelas oficiais, portanto alimentam dashboard, ranking, estoque e produção sugerida existentes. `DailyProductionBriefService` é determinístico. O perfil de produção restrita bloqueia texto livre, áudio e PDF antes da IA; a confirmação de quadro reutiliza `ProductionOrderService`, e a rejeição remove a foto privada mantendo auditoria mínima.
+## Transporte GraphQL
 
-## Ativação futura
+`GrandChefGraphqlClient` recebe obrigatoriamente uma `PdvConnection` e é responsável por:
 
-1. Validar documentação e sandbox.
-2. Implementar autenticação e transporte dentro de `GrandChefPdvProvider`.
-3. Adaptar somente o normalizador do payload real.
-4. Configurar mappings e credenciais fora do Git.
-5. Testar conexão, backfill pequeno, duplicidade e cancelamento no sandbox.
-6. Habilitar polling ou webhook — conforme capacidade documentada — e monitorar reconciliação/lag.
+- endpoint e Bearer da conexão;
+- HTTPS;
+- timeout;
+- retry limitado a falha de conexão e erro 5xx;
+- POST GraphQL;
+- distinção de HTTP 401/403, 5xx, erro GraphQL, resposta inválida e resposta vazia;
+- mensagens seguras sem corpo bruto ou credencial.
 
-## Aguardando GrandChef
+`GrandChefQueryContract` isola a parte que depende do schema real: query de conexão, listagem, detalhe, paginação e normalização. Testes de transporte continuam usando `Http::fake` e não acessam a internet.
 
-Solicitar ao fornecedor:
+Contrato confirmado:
 
-- documentação técnica oficial e base URL;
-- método de autenticação, credenciais e ambiente sandbox;
-- endpoints de vendas, venda individual, produtos, unidades e formas de pagamento;
-- paginação, filtros por data/`updated_at`, cursor e limites de requisição;
-- IDs únicos e estabilidade dos IDs de venda, item, pagamento, produto e unidade;
-- estados possíveis de venda, cancelamento, estorno e reembolso parcial;
-- timestamps, timezone e preservação do horário original;
-- suporte a backfill/histórico e janela máxima;
-- existência de webhook, eventos, assinatura, replay protection e política de retry;
-- custos adicionais, limites e SLA da API;
-- canal técnico para homologação e troubleshooting.
+- `pedidos(filter: PedidoFilter, order: PedidoOrder, limit: Int, page: Int): PedidoPagination`;
+- `PedidoFilter.data_conclusao: DateFilter`, usando `from` e `to` (`DateTime`);
+- `PedidoFilter.estado: PedidoEstadoFilter`, usando `eq: concluido`;
+- paginação por `current_page`, `last_page` e `has_more_pages`;
+- `pedido(id: ID, codigo: String, mesa: Int): PedidoSummary`;
+- `PedidoSummary.itens: [Item]` e `PedidoSummary.pagamentos: [Pagamento]`;
+- `Item.produto: Produto` e `Pagamento.forma: Forma`.
 
-Não assumir `/api/v1`, não fazer scraping e não automatizar o painel web. Se não houver API, avaliar apenas exportação CSV/arquivo ou acesso read-only oficialmente autorizado.
+A listagem retorna cabeçalhos `Pedido`, sem itens e pagamentos. Para que o relatório seja completo, o provider consulta read-only `pedido(id: ...)` para cada pedido da página. Se algum detalhe não for retornado, a consulta falha de forma explícita em vez de apresentar totais parciais como fechamento.
+
+## Relatório read-only
+
+O relatório por período usa `America/Sao_Paulo`, percorre cursores opacos com limite de páginas e bloqueio de cursor repetido. Se o total informado não corresponder à quantidade integral obtida, a interface marca o resultado como parcial.
+
+São preservados separadamente:
+
+- subtotal/bruto;
+- descontos;
+- total da venda;
+- total pago;
+- troco;
+- itens e quantidades;
+- todos os pagamentos, inclusive split payment;
+- status, IDs externos e timestamps.
+
+O relatório não cria `ProductSale`, `StockMovement`, `IngredientStockMovement`, financeiro, recebível ou qualquer lançamento operacional. A futura importação continuará obrigatoriamente pelo fluxo:
+
+`GrandChef → PdvConnection → Provider → mappings → PdvSaleImportService → ProductSaleService → StockMovementService`.
+
+## Idempotência e sanitização
+
+Os identificadores permanecem escopados por conexão:
+
+- `pdv_connection_id + external_sale_id + external_item_id`;
+- `pdv_connection_id + external_event_id`;
+- `pdv_connection_id + external_product_id`.
+
+`PdvPayloadSanitizer` remove recursivamente authorization, Bearer, tokens, secrets, passwords e cookies antes de persistir inbox ou metadados de observabilidade. Respostas integrais de erro de autenticação não são armazenadas.
+
+## Limites atuais
+
+Mutations, backfill amplo, webhook e importação oficial continuam fora deste incremento. O relatório é estritamente read-only e a contagem oficial de coxinhas continua dependendo de mappings confirmados por uma pessoa.

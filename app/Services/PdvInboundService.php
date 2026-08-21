@@ -4,14 +4,15 @@ namespace App\Services;
 
 use App\Models\PdvConnection;
 use App\Models\PdvInboundEvent;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 class PdvInboundService
 {
+    public function __construct(private PdvPayloadSanitizer $sanitizer) {}
+
     public function receive(PdvConnection $connection, string $eventId, string $type, array $payload, ?string $saleId = null): PdvInboundEvent
     {
-        $sanitized = Arr::except($payload, ['token', 'secret', 'password', 'access_token', 'authorization']);
+        $sanitized = $this->sanitizer->sanitize($payload);
         $json = json_encode($sanitized, JSON_THROW_ON_ERROR);
         if (strlen($json) > config('pdv.payload_max_bytes')) {
             $sanitized = ['truncated' => true, 'keys' => array_keys($sanitized)];
