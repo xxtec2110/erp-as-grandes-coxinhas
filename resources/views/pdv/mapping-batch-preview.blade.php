@@ -14,6 +14,7 @@
         <form method="POST" action="{{ route('pdv.mappings.products.batch.confirm', $connection) }}" class="space-y-3">
             @csrf
             <input type="hidden" name="confirmed" value="1"><input type="hidden" name="from" value="{{ $from }}"><input type="hidden" name="to" value="{{ $to }}">
+            <input type="hidden" name="idempotency_key" value="{{ request('idempotency_key') }}"><input type="hidden" name="reason" value="{{ request('reason') }}">
             @foreach ($rows as $index => $row)
                 <input type="hidden" name="rows[{{ $index }}][selected]" value="1">
                 <input type="hidden" name="rows[{{ $index }}][external_product_id]" value="{{ $row['selection']['external_product_id'] }}">

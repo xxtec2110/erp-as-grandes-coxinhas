@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\PaymentFee;
 use App\Models\PdvConnection;
 use App\Models\PdvPaymentMethodMapping;
 use App\Models\PdvProductMapping;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Carbon\CarbonImmutable;
@@ -19,6 +21,7 @@ class PdvMappingCatalogService
         private PdvPaymentCompatibilityService $payments,
         private PaymentFeeResolver $fees,
         private StockBalanceService $balances,
+        private PdvProductOnboardingService $onboarding,
     ) {}
 
     /** @return array{products:Collection<int,array<string,mixed>>,payments:Collection<int,array<string,mixed>>,summary:array<string,mixed>,stock_preview:Collection<int,array<string,mixed>>,missing_products:Collection<int,array<string,mixed>>} */
@@ -50,6 +53,7 @@ class PdvMappingCatalogService
                 'payments_unmapped' => $payments->where('mapping_status', '!=', 'confirmed')->where('compatibility.supported', true)->count(),
                 'payments_unsupported' => $payments->where('compatibility.supported', false)->count(),
                 'payments_rate_missing' => $payments->where('rate_missing', true)->count(),
+                'payments_configuration_missing' => $payments->where('configuration_missing', true)->count(),
             ],
             'stock_preview' => $stockPreview,
             'missing_products' => $products->where('suggestion.type', PdvExternalProductSuggestionService::TYPE_NONE)->values(),
@@ -60,12 +64,23 @@ class PdvMappingCatalogService
     public function products(PdvConnection $connection, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): Collection
     {
         $erpProducts = Product::query()->with(['category', 'aliases'])->orderBy('name')->get();
+        $categories = ProductCategory::query()->where('active', true)->orderBy('name')->get();
         $mappings = PdvProductMapping::query()
             ->whereBelongsTo($connection, 'connection')
             ->with(['product.category', 'product.aliases'])
             ->get()
             ->keyBy('external_product_id');
         $stock = [];
+        $priceObservations = DB::table('pdv_order_items as items')
+            ->join('pdv_orders as orders', 'orders.id', '=', 'items.pdv_order_id')
+            ->where('orders.pdv_connection_id', $connection->id)
+            ->whereBetween('orders.external_completed_at', [$fromUtc, $toUtc])
+            ->where('items.present_in_latest', true)
+            ->where('items.cancelled', false)
+            ->whereNotNull('items.external_product_id')
+            ->orderByDesc('orders.external_completed_at')->orderByDesc('items.id')
+            ->get(['items.external_product_id', 'items.unit_price'])
+            ->groupBy('external_product_id');
 
         return DB::table('pdv_order_items as items')
             ->join('pdv_orders as orders', 'orders.id', '=', 'items.pdv_order_id')
@@ -78,7 +93,7 @@ class PdvMappingCatalogService
             ->orderByRaw('MAX(items.description)')
             ->selectRaw('items.external_product_id, MAX(items.external_product_code) AS external_product_code, MAX(items.description) AS description, COUNT(*) AS line_count, SUM(items.quantity) AS quantity_total, SUM(items.total) AS value_total, COUNT(DISTINCT items.pdv_order_id) AS order_count, MIN(orders.external_completed_at) AS first_appearance, MAX(orders.external_completed_at) AS last_appearance')
             ->get()
-            ->map(function (object $row) use ($connection, $erpProducts, $mappings, &$stock): array {
+            ->map(function (object $row) use ($connection, $erpProducts, $categories, $mappings, $priceObservations, &$stock): array {
                 $mapping = $mappings->get($row->external_product_id);
                 $suggestion = $this->suggestions->suggest((string) $row->description, $erpProducts);
                 $mappingStatus = $mapping?->status === 'confirmed' && $mapping->product_id !== null ? 'confirmed' : ($mapping?->status ?? 'unmapped');
@@ -95,6 +110,7 @@ class PdvMappingCatalogService
                         'required' => (string) $required,
                         'available' => (string) BigDecimal::of($available)->toScale(6, RoundingMode::HalfUp),
                         'deficit' => (string) $deficit->toScale(6, RoundingMode::HalfUp),
+                        'opening_stock_available' => $mappingStatus === 'confirmed' && $deficit->isPositive(),
                     ];
                 }
 
@@ -112,6 +128,8 @@ class PdvMappingCatalogService
                     'mapping_status' => $mappingStatus,
                     'suggestion' => $suggestion,
                     'stock_preview' => $stockPreview,
+                    'prices' => $this->onboarding->priceDetails($priceObservations->get($row->external_product_id, collect())),
+                    'suggested_category' => $this->onboarding->suggestedCategory((string) $row->description, $categories),
                 ];
             })->values();
     }
@@ -124,6 +142,7 @@ class PdvMappingCatalogService
             ->with(['acquirer', 'cardBrand'])
             ->get()
             ->keyBy('external_method_code');
+        $fees = PaymentFee::query()->with(['acquirer', 'cardBrand'])->where('active', true)->where('is_current', true)->get();
 
         return DB::table('pdv_order_payments as payments')
             ->join('pdv_orders as orders', 'orders.id', '=', 'payments.pdv_order_id')
@@ -135,13 +154,19 @@ class PdvMappingCatalogService
             ->orderBy('payments.external_form_description')
             ->selectRaw('payments.external_form_id, payments.external_form_description, payments.external_type, COUNT(*) AS occurrence_count, SUM(payments.amount) AS amount_total, COUNT(DISTINCT payments.pdv_order_id) AS order_count')
             ->get()
-            ->map(function (object $row) use ($connection, $fromUtc, $toUtc, $mappings): array {
+            ->map(function (object $row) use ($connection, $fromUtc, $toUtc, $mappings, $fees): array {
                 $mapping = $mappings->get($row->external_form_id);
                 $compatibility = $this->payments->forExternal($row->external_form_description, $row->external_type);
                 $mappingStatus = $mapping?->status === 'confirmed' && $mapping->payment_method !== null ? 'confirmed' : ($mapping?->status ?? 'unmapped');
                 $rateMissing = $mappingStatus === 'confirmed'
                     && in_array($mapping?->payment_method, ['debit', 'credit'], true)
                     && ! $this->hasRateCoverage($connection, (string) $row->external_form_id, $mapping, $fromUtc, $toUtc);
+                $financialOptions = $compatibility['requires_rate']
+                    ? $fees->where('payment_method', $compatibility['method'])
+                        ->filter(fn (PaymentFee $fee): bool => $fee->acquirer?->active && $fee->cardBrand?->active && $this->hasRateCoverageFor($connection, (string) $row->external_form_id, $fee->acquirer_id, $fee->card_brand_id, (string) $compatibility['method'], $fromUtc, $toUtc))
+                        ->unique(fn (PaymentFee $fee): string => $fee->acquirer_id.':'.$fee->card_brand_id)
+                        ->values()
+                    : collect();
 
                 return [
                     'external_form_id' => (string) $row->external_form_id,
@@ -154,6 +179,8 @@ class PdvMappingCatalogService
                     'mapping_status' => $mappingStatus,
                     'compatibility' => $compatibility,
                     'rate_missing' => $rateMissing,
+                    'financial_options' => $financialOptions,
+                    'configuration_missing' => $compatibility['requires_rate'] && $financialOptions->isEmpty(),
                 ];
             })->values();
     }
@@ -172,6 +199,11 @@ class PdvMappingCatalogService
             return false;
         }
 
+        return $this->hasRateCoverageFor($connection, $externalFormId, $mapping->acquirer_id, $mapping->card_brand_id, $mapping->payment_method, $fromUtc, $toUtc);
+    }
+
+    private function hasRateCoverageFor(PdvConnection $connection, string $externalFormId, int $acquirerId, int $cardBrandId, string $method, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): bool
+    {
         return DB::table('pdv_order_payments as payments')
             ->join('pdv_orders as orders', 'orders.id', '=', 'payments.pdv_order_id')
             ->where('orders.pdv_connection_id', $connection->id)
@@ -180,9 +212,9 @@ class PdvMappingCatalogService
             ->where('payments.external_form_id', $externalFormId)
             ->get(['payments.installments', 'orders.external_completed_at'])
             ->every(fn (object $payment): bool => $this->fees->resolve(
-                $mapping->acquirer_id,
-                $mapping->card_brand_id,
-                $mapping->payment_method,
+                $acquirerId,
+                $cardBrandId,
+                $method,
                 $payment->installments === null ? null : (int) $payment->installments,
                 CarbonImmutable::parse((string) $payment->external_completed_at)->setTimezone(config('app.timezone'))->toDateString(),
             ) !== null);

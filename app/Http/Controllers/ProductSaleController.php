@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ProductSalePaymentMethod;
 use App\Http\Requests\ProductSaleRequest;
 use App\Models\Acquirer;
 use App\Models\CardBrand;
@@ -32,13 +33,14 @@ class ProductSaleController extends Controller
             ?? $locations->first();
         $start = $request->date('start_date')?->toDateString() ?? now()->startOfMonth()->toDateString();
         $end = $request->date('end_date')?->toDateString() ?? now()->toDateString();
+        $paymentMethod = in_array($request->string('payment_method')->toString(), ProductSalePaymentMethod::values(), true) ? $request->string('payment_method')->toString() : null;
 
-        return view('sales.index', ['sales' => ProductSale::query()->with(['product.category', 'location', 'creator', 'acquirer', 'cardBrand'])->when($location, fn ($query) => $query->where('location_id', $location->id))->latest('operation_date')->paginate(20)->withQueryString(), 'locations' => $locations, 'location' => $location, 'startDate' => $start, 'endDate' => $end, 'summary' => $location ? $summary->summarize($location, $start, $end) : []]);
+        return view('sales.index', ['sales' => ProductSale::query()->with(['product.category', 'location', 'creator', 'acquirer', 'cardBrand'])->when($location, fn ($query) => $query->where('location_id', $location->id))->when($paymentMethod, fn ($query) => $query->where('payment_method', $paymentMethod))->latest('operation_date')->paginate(20)->withQueryString(), 'locations' => $locations, 'location' => $location, 'startDate' => $start, 'endDate' => $end, 'paymentMethod' => $paymentMethod, 'paymentMethods' => ProductSalePaymentMethod::cases(), 'summary' => $location ? $summary->summarize($location, $start, $end, $paymentMethod) : []]);
     }
 
     public function create(Request $request, AuthorizationService $auth): View
     {
-        return view('sales.create', ['products' => Product::query()->where('active', true)->with('category')->orderBy('name')->get(), 'locations' => $auth->accessibleLocations($request->user())->where('type', Location::TYPE_STORE), 'acquirers' => Acquirer::query()->where('active', true)->orderBy('name')->get(), 'brands' => CardBrand::query()->where('active', true)->orderBy('name')->get(), 'idempotencyKey' => (string) Str::uuid()]);
+        return view('sales.create', ['products' => Product::query()->where('active', true)->with('category')->orderBy('name')->get(), 'locations' => $auth->accessibleLocations($request->user())->where('type', Location::TYPE_STORE), 'acquirers' => Acquirer::query()->where('active', true)->orderBy('name')->get(), 'brands' => CardBrand::query()->where('active', true)->orderBy('name')->get(), 'paymentMethods' => ProductSalePaymentMethod::cases(), 'idempotencyKey' => (string) Str::uuid()]);
     }
 
     public function store(ProductSaleRequest $request, ProductSaleService $service): RedirectResponse

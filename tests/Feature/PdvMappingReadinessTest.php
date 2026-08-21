@@ -6,6 +6,7 @@ use App\Data\Stock\RecordStockMovementData;
 use App\Enums\StockMovementType;
 use App\Models\Acquirer;
 use App\Models\CardBrand;
+use App\Models\CatalogAdminAudit;
 use App\Models\IngredientStockMovement;
 use App\Models\Location;
 use App\Models\PaymentFee;
@@ -16,6 +17,7 @@ use App\Models\PdvProductMapping;
 use App\Models\Permission;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductPrice;
 use App\Models\ProductSale;
 use App\Models\StockMovement;
 use App\Models\User;
@@ -28,6 +30,7 @@ use App\Services\StockMovementService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\AuthorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -105,7 +108,7 @@ class PdvMappingReadinessTest extends TestCase
         $this->assertSame('none', $this->catalog()['products']->first()['suggestion']['type']);
 
         try {
-            app(PdvMappingService::class)->confirmProduct($this->ibiraConnection, 'P1', $inactive->id);
+            $this->confirmProduct($this->ibiraConnection, 'P1', $inactive->id);
             $this->fail('Produto inativo não deveria ser aceito.');
         } catch (ValidationException $exception) {
             $this->assertArrayHasKey('product_id', $exception->errors());
@@ -119,21 +122,19 @@ class PdvMappingReadinessTest extends TestCase
         $secondProduct = $this->product('Costela com queijo');
         $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '16')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '16')], '16');
         $productsBefore = Product::query()->count();
-        $service = app(PdvMappingService::class);
-
-        $first = $service->confirmProduct($this->ibiraConnection, 'P1', $firstProduct->id);
-        $same = $service->confirmProduct($this->ibiraConnection, 'P1', $firstProduct->id);
+        $first = $this->confirmProduct($this->ibiraConnection, 'P1', $firstProduct->id);
+        $same = $this->confirmProduct($this->ibiraConnection, 'P1', $firstProduct->id);
         $this->assertSame($first->id, $same->id);
         $this->assertDatabaseCount('pdv_product_mappings', 1);
         $this->assertSame($productsBefore, Product::query()->count());
 
         try {
-            $service->confirmProduct($this->ibiraConnection, 'P1', $secondProduct->id);
+            $this->confirmProduct($this->ibiraConnection, 'P1', $secondProduct->id);
             $this->fail('Remap silencioso não deveria ser aceito.');
         } catch (ValidationException $exception) {
             $this->assertArrayHasKey('confirm_remap', $exception->errors());
         }
-        $updated = $service->confirmProduct($this->ibiraConnection, 'P1', $secondProduct->id, true);
+        $updated = $this->confirmProduct($this->ibiraConnection, 'P1', $secondProduct->id, true);
         $this->assertSame($secondProduct->id, $updated->product_id);
         $this->assertDatabaseCount('pdv_product_mappings', 1);
     }
@@ -143,14 +144,14 @@ class PdvMappingReadinessTest extends TestCase
         $product = $this->product('Frango com catupiry');
         $this->order($this->catanduvaConnection, 'CAT-1', [$this->item('I-1', 'SHARED', '1', 'Coxinha de frango', '1', '10')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '10')], '10');
         $this->expectException(ValidationException::class);
-        app(PdvMappingService::class)->confirmProduct($this->ibiraConnection, 'SHARED', $product->id);
+        $this->confirmProduct($this->ibiraConnection, 'SHARED', $product->id);
     }
 
     public function test_batch_preview_never_saves_and_confirmation_gate_is_required(): void
     {
         $product = $this->product('Frango com catupiry');
         $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '16')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '16')], '16');
-        $payload = ['from' => '2026-08-20', 'to' => '2026-08-20', 'rows' => [['selected' => 1, 'external_product_id' => 'P1', 'product_id' => $product->id, 'confirm_remap' => 0]]];
+        $payload = ['from' => '2026-08-20', 'to' => '2026-08-20', 'idempotency_key' => (string) Str::uuid(), 'rows' => [['selected' => 1, 'external_product_id' => 'P1', 'product_id' => $product->id, 'confirm_remap' => 0]]];
 
         $this->actingAs($this->admin)->post(route('pdv.mappings.products.batch.preview', $this->ibiraConnection), $payload)
             ->assertOk()->assertSee('Nada foi gravado')->assertSee('Frango com catupiry');
@@ -168,17 +169,17 @@ class PdvMappingReadinessTest extends TestCase
     {
         $product = $this->product('Frango com catupiry');
         $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '16')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '16')], '16');
-        $period = ['from' => '2026-08-20', 'to' => '2026-08-20'];
+        $period = ['from' => '2026-08-20', 'to' => '2026-08-20', 'idempotency_key' => (string) Str::uuid()];
 
         $this->actingAs($this->admin)->put(route('pdv.mappings.products.update', [$this->ibiraConnection, 'P1']), [...$period, 'product_id' => $product->id])->assertRedirect();
-        $this->actingAs($this->admin)->put(route('pdv.mappings.payments.update', [$this->ibiraConnection, '99900']), [...$period, 'payment_method' => 'cash'])->assertRedirect();
+        $this->actingAs($this->admin)->put(route('pdv.mappings.payments.update', [$this->ibiraConnection, '99900']), [...$period, 'idempotency_key' => (string) Str::uuid(), 'payment_method' => 'cash'])->assertRedirect();
         $this->assertDatabaseHas('pdv_product_mappings', ['external_product_id' => 'P1', 'product_id' => $product->id, 'status' => 'confirmed']);
         $this->assertDatabaseHas('pdv_payment_method_mappings', ['external_method_code' => '99900', 'payment_method' => 'cash', 'status' => 'confirmed']);
         $this->assertDatabaseCount('product_sales', 0);
         $this->assertDatabaseCount('stock_movements', 0);
     }
 
-    public function test_payment_catalog_aggregates_split_payment_and_marks_pix_unsupported(): void
+    public function test_payment_catalog_aggregates_split_payment_and_supports_pix_as_its_own_method(): void
     {
         $this->product('Frango com catupiry');
         $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '80')], [
@@ -188,47 +189,44 @@ class PdvMappingReadinessTest extends TestCase
         $catalog = $this->catalog();
 
         $this->assertSame(2, $catalog['summary']['payments_distinct']);
-        $this->assertSame(1, $catalog['summary']['payments_unmapped']);
-        $this->assertSame(1, $catalog['summary']['payments_unsupported']);
+        $this->assertSame(2, $catalog['summary']['payments_unmapped']);
+        $this->assertSame(0, $catalog['summary']['payments_unsupported']);
         $this->assertSame(80, $catalog['payments']->sum(fn (array $row): string => $row['amount_total']));
-        $this->assertFalse($catalog['payments']->firstWhere('external_form_id', '101265')['compatibility']['supported']);
+        $this->assertTrue($catalog['payments']->firstWhere('external_form_id', '101265')['compatibility']['supported']);
+        $this->assertSame('pix', $catalog['payments']->firstWhere('external_form_id', '101265')['compatibility']['method']);
         $this->assertDatabaseCount('pdv_payment_method_mappings', 0);
     }
 
-    public function test_cash_mapping_is_supported_without_financial_fiction_and_pix_is_rejected(): void
+    public function test_cash_and_pix_mappings_are_supported_without_card_configuration_or_financial_fiction(): void
     {
         $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Produto', '1', '20')], [
             $this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '10'),
             $this->payment('PAY-2', '101265', 'Pix', 'pix', '10'),
         ], '20');
-        $service = app(PdvMappingService::class);
         $compatibility = app(PdvPaymentCompatibilityService::class);
         $this->assertSame('cash', $compatibility->forExternal('Dinheiro', 'dinheiro')['method']);
         $this->assertSame('debit', $compatibility->forExternal('Débito', 'debito')['method']);
         $this->assertSame('credit', $compatibility->forExternal('Crédito', 'credito')['method']);
-        $this->assertFalse($compatibility->forExternal('Pix', 'pix')['supported']);
-        $cash = $service->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
+        $this->assertSame('pix', $compatibility->forExternal('Pix', 'pix')['method']);
+        $cash = $this->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
         $this->assertNull($cash->acquirer_id);
         $this->assertNull($cash->card_brand_id);
-
-        try {
-            $service->confirmPayment($this->ibiraConnection, '101265', ['payment_method' => 'debit', 'acquirer_id' => 1, 'card_brand_id' => 1]);
-            $this->fail('Pix não deveria aceitar equivalência artificial.');
-        } catch (ValidationException $exception) {
-            $this->assertArrayHasKey('payment_method', $exception->errors());
-        }
-        $this->assertDatabaseCount('pdv_payment_method_mappings', 1);
+        $pix = $this->confirmPayment($this->ibiraConnection, '101265', ['payment_method' => 'pix']);
+        $this->assertNull($pix->acquirer_id);
+        $this->assertNull($pix->card_brand_id);
+        $this->assertDatabaseCount('pdv_payment_method_mappings', 2);
     }
 
     public function test_debit_mapping_requires_active_catalogs_and_readiness_requires_current_rate(): void
     {
         $product = $this->product('Frango com catupiry');
         $order = $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '2', '20')], [$this->payment('PAY-1', '99902', 'Débito', 'debito', '20')], '20');
-        app(PdvMappingService::class)->confirmProduct($this->ibiraConnection, 'P1', $product->id);
+        $this->confirmProduct($this->ibiraConnection, 'P1', $product->id);
         $acquirer = Acquirer::query()->create(['name' => 'Adquirente', 'active' => true]);
         $brand = CardBrand::query()->create(['name' => 'Bandeira', 'active' => true]);
-        app(PdvMappingService::class)->confirmPayment($this->ibiraConnection, '99902', ['payment_method' => 'debit', 'acquirer_id' => $acquirer->id, 'card_brand_id' => $brand->id]);
         $this->stock($product, '10');
+
+        PdvPaymentMethodMapping::query()->create(['pdv_connection_id' => $this->ibiraConnection->id, 'external_method_code' => '99902', 'external_name' => 'Débito', 'payment_method' => 'debit', 'acquirer_id' => $acquirer->id, 'card_brand_id' => $brand->id, 'status' => 'confirmed']);
 
         $withoutRate = app(PdvOrderReconciliationService::class)->reconcile($order);
         $this->assertContains('payment_rate_missing', collect($withoutRate['blockers'])->pluck('code'));
@@ -247,15 +245,15 @@ class PdvMappingReadinessTest extends TestCase
             $this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '10'),
             $this->payment('PAY-2', '101265', 'Pix', 'pix', '10'),
         ], '20');
-        app(PdvMappingService::class)->confirmProduct($this->ibiraConnection, 'P1', $product->id);
-        app(PdvMappingService::class)->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
+        $this->confirmProduct($this->ibiraConnection, 'P1', $product->id);
+        $this->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
         $this->stock($product, '10');
         $result = app(PdvOrderReconciliationService::class)->reconcile($order);
         $codes = collect($result['blockers'])->pluck('code');
 
         $this->assertFalse($result['ready_for_import']);
         $this->assertContains('product_mapping_missing', $codes);
-        $this->assertContains('payment_mapping_unsupported', $codes);
+        $this->assertContains('payment_mapping_missing', $codes);
         $this->assertDatabaseCount('product_sales', 0);
     }
 
@@ -266,8 +264,8 @@ class PdvMappingReadinessTest extends TestCase
             $this->item('I-1', 'P1', '33', 'Coxinha de frango', '1', '10'),
             $this->item('I-2', 'P1', '33', 'Coxinha de frango', '2', '20'),
         ], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '30')], '30');
-        app(PdvMappingService::class)->confirmProduct($this->ibiraConnection, 'P1', $product->id);
-        app(PdvMappingService::class)->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
+        $this->confirmProduct($this->ibiraConnection, 'P1', $product->id);
+        $this->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
         $this->stock($product, '2');
         $result = app(PdvOrderReconciliationService::class)->reconcile($order);
 
@@ -300,10 +298,78 @@ class PdvMappingReadinessTest extends TestCase
         $this->assertSame($before, $this->integrityCounts());
     }
 
+    public function test_mapping_audit_preserves_before_after_actor_connection_and_sanitized_history(): void
+    {
+        $first = $this->product('Frango com catupiry');
+        $second = $this->product('Costela com queijo');
+        $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango', '1', '16')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '16')], '16');
+
+        $this->confirmProduct($this->ibiraConnection, 'P1', $first->id);
+        $this->confirmProduct($this->ibiraConnection, 'P1', $second->id, true);
+
+        $audits = CatalogAdminAudit::query()->where('status', 'success')->orderBy('id')->get();
+        $this->assertCount(2, $audits);
+        $this->assertSame($this->admin->id, $audits->last()->user_id);
+        $this->assertSame($this->ibiraConnection->id, $audits->last()->context['pdv_connection_id']);
+        $this->assertSame('product', $audits->last()->context['mapping_type']);
+        $this->assertSame('change', $audits->last()->context['action']);
+        $this->assertSame($first->id, $audits->last()->before_values['product_id']);
+        $this->assertSame($second->id, $audits->last()->after_values['product_id']);
+        $serialized = mb_strtolower(json_encode($audits->toArray(), JSON_THROW_ON_ERROR));
+        $this->assertStringNotContainsString('bearer_token', $serialized);
+        $this->assertStringNotContainsString('device_token', $serialized);
+        $this->assertStringNotContainsString('authorization', $serialized);
+    }
+
+    public function test_human_onboarding_shows_observed_prices_blocks_missing_category_and_uses_official_product_flow_only_after_submit(): void
+    {
+        $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'BEB-1', '70', '01- ÁGUA DE COCO', '1', '12')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '12')], '12');
+        $this->order($this->ibiraConnection, 'IB-2', [$this->item('I-1', 'BEB-1', '70', '01- ÁGUA DE COCO', '1', '14')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '14')], '14');
+        $url = route('products.create', ['pdv_connection_id' => $this->ibiraConnection->id, 'external_product_id' => 'BEB-1', 'onboarding_from' => '2026-08-20', 'onboarding_to' => '2026-08-20']);
+        $productsBefore = Product::query()->count();
+
+        $this->actingAs($this->admin)->get($url)->assertOk()->assertSee('Onboarding humano')->assertSee('Categoria oficial para bebidas precisa ser definida')->assertSee('12,00')->assertSee('14,00');
+        $this->assertSame($productsBefore, Product::query()->count());
+        $payload = ['name' => 'Água de Coco', 'product_category_id' => $this->coxinhas->id, 'stock_unit' => 'un', 'selling_price' => '14.00', 'active' => 1, 'pdv_connection_id' => $this->ibiraConnection->id, 'external_product_id' => 'BEB-1', 'onboarding_from' => '2026-08-20', 'onboarding_to' => '2026-08-20'];
+        $this->actingAs($this->admin)->post(route('products.store'), $payload)->assertSessionHasErrors('product_category_id');
+        $this->assertSame($productsBefore, Product::query()->count());
+
+        $beverages = ProductCategory::query()->create(['name' => 'Bebidas', 'active' => true]);
+        $this->actingAs($this->admin)->get($url)->assertOk()->assertSee('Bebidas')->assertDontSee('Categoria oficial para bebidas precisa ser definida');
+        $this->actingAs($this->admin)->post(route('products.store'), [...$payload, 'product_category_id' => $beverages->id])->assertRedirect(route('pdv.mappings', [$this->ibiraConnection, 'from' => '2026-08-20', 'to' => '2026-08-20', 'status' => 'unmapped']));
+        $created = Product::query()->where('name', 'Água de Coco')->firstOrFail();
+        $this->assertSame($beverages->id, $created->product_category_id);
+        $this->assertDatabaseHas('product_prices', ['product_id' => $created->id, 'price' => '14.0000', 'is_current' => true]);
+        $this->assertDatabaseCount('pdv_product_mappings', 0);
+        $this->assertSame(1, ProductPrice::query()->whereBelongsTo($created)->count());
+    }
+
+    public function test_readiness_wizard_and_simulations_are_derived_without_persistence(): void
+    {
+        $this->product('Frango com catupiry');
+        $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '16')], [$this->payment('PAY-1', '101265', 'Pix', 'pix', '16')], '16');
+        $before = $this->integrityCounts();
+
+        $this->actingAs($this->admin)->get(route('pdv.mappings', [$this->ibiraConnection, 'from' => '2026-08-20', 'to' => '2026-08-20']))
+            ->assertOk()->assertSee('Etapa 1')->assertSee('Próximas ações para liberar a operação')->assertSee('Pedidos em que Pix deixa de ser incompatível')->assertSee('Pix')->assertDontSee('Importar venda');
+        $this->assertSame($before, $this->integrityCounts());
+    }
+
     /** @return array<string,mixed> */
     private function catalog(): array
     {
         return app(PdvMappingCatalogService::class)->forPeriod($this->ibiraConnection, CarbonImmutable::parse('2026-08-20', 'America/Sao_Paulo'), CarbonImmutable::parse('2026-08-20', 'America/Sao_Paulo'));
+    }
+
+    private function confirmProduct(PdvConnection $connection, string $externalProductId, int $productId, bool $confirmRemap = false): PdvProductMapping
+    {
+        return app(PdvMappingService::class)->confirmProduct($connection, $externalProductId, $productId, $this->admin, (string) Str::uuid(), $confirmRemap);
+    }
+
+    /** @param array<string,mixed> $data */
+    private function confirmPayment(PdvConnection $connection, string $externalFormId, array $data): PdvPaymentMethodMapping
+    {
+        return app(PdvMappingService::class)->confirmPayment($connection, $externalFormId, [...$data, 'idempotency_key' => (string) Str::uuid()], $this->admin);
     }
 
     private function product(string $name, bool $active = true): Product

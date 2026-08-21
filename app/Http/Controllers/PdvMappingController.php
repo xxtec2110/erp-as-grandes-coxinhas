@@ -14,9 +14,12 @@ use App\Models\PdvLocationMapping;
 use App\Models\PdvPaymentMethodMapping;
 use App\Models\PdvProductMapping;
 use App\Models\Product;
+use App\Services\AuthorizationService;
 use App\Services\PdvConnectionAccessService;
+use App\Services\PdvMappingAuditService;
 use App\Services\PdvMappingCatalogService;
 use App\Services\PdvMappingService;
+use App\Services\PdvOperationalReadinessService;
 use App\Services\PdvOrderPreviewService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -26,17 +29,23 @@ use Illuminate\View\View;
 
 class PdvMappingController extends Controller
 {
-    public function index(PdvOrderPeriodRequest $request, PdvConnection $connection, PdvConnectionAccessService $access, PdvMappingCatalogService $catalog, PdvOrderPreviewService $preview): View
+    public function index(PdvOrderPeriodRequest $request, PdvConnection $connection, PdvConnectionAccessService $access, PdvMappingCatalogService $catalog, PdvOrderPreviewService $preview, PdvOperationalReadinessService $operational, PdvMappingAuditService $audits, AuthorizationService $authorization): View
     {
         $access->authorizeConnection($request->user(), $connection);
         $access->assertOperationalScope($connection);
         [$from, $to, $fromDate, $toDate] = $this->period($request->validated(), $connection);
         $status = $request->string('status')->toString() === 'all' ? 'all' : 'unmapped';
 
+        $catalogData = $catalog->forPeriod($connection, $fromDate, $toDate, $status);
+        $readinessData = $preview->period($connection, $fromDate, $toDate);
+
         return view('pdv.mappings', [
             'connection' => $connection->load('location'),
-            'catalog' => $catalog->forPeriod($connection, $fromDate, $toDate, $status),
-            'readiness' => $preview->period($connection, $fromDate, $toDate),
+            'catalog' => $catalogData,
+            'readiness' => $readinessData,
+            'operationalReadiness' => $operational->build($connection, $fromDate, $toDate, $catalogData, $readinessData),
+            'mappingAudits' => $audits->history($connection),
+            'canCreateProducts' => $authorization->allows($request->user(), 'products.create'),
             'erpProducts' => Product::query()->where('active', true)->with('category')->orderBy('name')->get(),
             'acquirers' => Acquirer::query()->where('active', true)->orderBy('name')->get(),
             'cardBrands' => CardBrand::query()->where('active', true)->orderBy('name')->get(),
@@ -50,7 +59,7 @@ class PdvMappingController extends Controller
     {
         $access->authorizeConnection($request->user(), $connection);
         $access->assertOperationalScope($connection);
-        $mappings->confirmProduct($connection, $externalProductId, (int) $request->validated('product_id'), $request->boolean('confirm_remap'));
+        $mappings->confirmProduct($connection, $externalProductId, (int) $request->validated('product_id'), $request->user(), (string) $request->validated('idempotency_key'), $request->boolean('confirm_remap'), $request->validated('reason'));
 
         return $this->backToMappings($connection, $request->validated('from'), $request->validated('to'), 'Mapping de produto confirmado manualmente.');
     }
@@ -59,7 +68,7 @@ class PdvMappingController extends Controller
     {
         $access->authorizeConnection($request->user(), $connection);
         $access->assertOperationalScope($connection);
-        $mappings->confirmPayment($connection, $externalFormId, $request->validated());
+        $mappings->confirmPayment($connection, $externalFormId, $request->validated(), $request->user());
 
         return $this->backToMappings($connection, $request->validated('from'), $request->validated('to'), 'Mapping financeiro confirmado manualmente.');
     }
@@ -91,7 +100,7 @@ class PdvMappingController extends Controller
         $access->assertOperationalScope($connection);
         abort_unless($request->boolean('confirmed'), 422, 'A confirmação explícita do lote é obrigatória.');
         $rows = $request->selectedRows();
-        $mappings->confirmProducts($connection, $rows);
+        $mappings->confirmProducts($connection, $rows, $request->user(), (string) $request->validated('idempotency_key'), $request->validated('reason'));
 
         return $this->backToMappings($connection, $request->validated('from'), $request->validated('to'), count($rows).' mapping(s) de produto confirmado(s) manualmente.');
     }
@@ -103,10 +112,10 @@ class PdvMappingController extends Controller
         $data = $request->validated();
         if ($data['mapping_type'] === 'product') {
             $mapping = PdvProductMapping::query()->whereBelongsTo($connection, 'connection')->findOrFail($data['mapping_id']);
-            $mappings->confirmProduct($connection, $mapping->external_product_id, (int) $data['target_id']);
+            $mappings->confirmProduct($connection, $mapping->external_product_id, (int) $data['target_id'], $request->user(), (string) $data['idempotency_key'], (bool) ($data['confirm_remap'] ?? false), $data['reason'] ?? null);
         } elseif ($data['mapping_type'] === 'payment') {
             $mapping = PdvPaymentMethodMapping::query()->whereBelongsTo($connection, 'connection')->findOrFail($data['mapping_id']);
-            $mappings->confirmPayment($connection, $mapping->external_method_code, $data);
+            $mappings->confirmPayment($connection, $mapping->external_method_code, $data, $request->user());
         } else {
             abort_unless((int) $data['target_id'] === $location->id, 422, 'O mapeamento de unidade precisa usar a unidade da conexão.');
             DB::transaction(function () use ($connection, $data): void {

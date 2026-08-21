@@ -172,12 +172,13 @@ class PdvOrderStagingTest extends TestCase
         $this->assertTrue($ready['totals_status']['payments_match']);
     }
 
-    public function test_unknown_pix_is_preserved_and_blocked_while_cancelled_order_does_not_require_mappings(): void
+    public function test_pix_is_preserved_as_supported_and_blocked_only_by_missing_mapping_while_cancelled_order_does_not_require_mappings(): void
     {
         $pix = app(PdvOrderStagingService::class)->stage($this->ibiraConnection, $this->singleItemSale(paymentCode: 'PIX', paymentName: 'Pix'));
         $pixResult = app(PdvOrderReconciliationService::class)->reconcile($pix);
         $this->assertDatabaseHas('pdv_order_payments', ['pdv_order_id' => $pix->id, 'external_form_id' => 'PIX', 'external_form_description' => 'Pix']);
-        $this->assertContains('payment_mapping_unsupported', collect($pixResult['blockers'])->pluck('code'));
+        $this->assertContains('payment_mapping_missing', collect($pixResult['blockers'])->pluck('code'));
+        $this->assertNotContains('payment_mapping_unsupported', collect($pixResult['blockers'])->pluck('code'));
 
         $cancelled = app(PdvOrderStagingService::class)->stage($this->ibiraConnection, $this->singleItemSale(id: 'ORDER-CANCELLED', status: 'cancelado'));
         $cancelledResult = app(PdvOrderReconciliationService::class)->reconcile($cancelled);

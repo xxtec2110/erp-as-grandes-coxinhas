@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\ProductSalePaymentMethod;
+
 class PdvPaymentCompatibilityService
 {
     /** @return array{supported:bool,method:?string,label:string,requires_acquirer:bool,requires_brand:bool,requires_rate:bool,reason:?string} */
@@ -10,23 +12,25 @@ class PdvPaymentCompatibilityService
         $value = $this->normalize(trim((string) $description.' '.(string) $type));
 
         return match (true) {
-            str_contains($value, 'pix') => $this->unsupported('Pix ainda não possui representação operacional correta no modelo de vendas.'),
-            str_contains($value, 'dinheiro'), str_contains($value, 'cash') => $this->supported('cash', 'Dinheiro', false),
-            str_contains($value, 'debito'), str_contains($value, 'debit') => $this->supported('debit', 'Débito', true),
-            str_contains($value, 'credito'), str_contains($value, 'credit') => $this->supported('credit', 'Crédito', true),
+            str_contains($value, 'pix') => $this->supported(ProductSalePaymentMethod::Pix),
+            str_contains($value, 'dinheiro'), str_contains($value, 'cash') => $this->supported(ProductSalePaymentMethod::Cash),
+            str_contains($value, 'debito'), str_contains($value, 'debit') => $this->supported(ProductSalePaymentMethod::Debit),
+            str_contains($value, 'credito'), str_contains($value, 'credit') => $this->supported(ProductSalePaymentMethod::Credit),
             default => $this->unsupported('A forma externa não possui equivalência financeira oficial reconhecida.'),
         };
     }
 
     public function supportsMethod(?string $method): bool
     {
-        return in_array($method, ['cash', 'debit', 'credit'], true);
+        return in_array($method, ProductSalePaymentMethod::values(), true);
     }
 
     /** @return array{supported:bool,method:string,label:string,requires_acquirer:bool,requires_brand:bool,requires_rate:bool,reason:null} */
-    private function supported(string $method, string $label, bool $card): array
+    private function supported(ProductSalePaymentMethod $method): array
     {
-        return ['supported' => true, 'method' => $method, 'label' => $label, 'requires_acquirer' => $card, 'requires_brand' => $card, 'requires_rate' => $card, 'reason' => null];
+        $card = $method->requiresCardConfiguration();
+
+        return ['supported' => true, 'method' => $method->value, 'label' => $method->label(), 'requires_acquirer' => $card, 'requires_brand' => $card, 'requires_rate' => $card, 'reason' => null];
     }
 
     /** @return array{supported:bool,method:null,label:string,requires_acquirer:bool,requires_brand:bool,requires_rate:bool,reason:string} */

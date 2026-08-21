@@ -10,9 +10,10 @@ use Brick\Math\RoundingMode;
 class SalesSummaryService
 {
     /** @return array<string, mixed> */
-    public function summarize(Location $location, string $start, string $end): array
+    public function summarize(Location $location, string $start, string $end, ?string $paymentMethod = null): array
     {
-        $query = ProductSale::query()->whereBelongsTo($location)->whereBetween('operation_date', [$start, $end]);
+        $query = ProductSale::query()->whereBelongsTo($location)->whereBetween('operation_date', [$start, $end])
+            ->when($paymentMethod, fn ($query) => $query->where('payment_method', $paymentMethod));
 
         $revenue = (string) (clone $query)->sum('total_amount');
         $cost = (string) (clone $query)->sum('total_cost_snapshot');

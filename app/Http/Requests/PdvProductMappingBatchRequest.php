@@ -24,6 +24,8 @@ class PdvProductMappingBatchRequest extends FormRequest
             'from' => ['required', 'date_format:Y-m-d'],
             'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
             'confirmed' => ['sometimes', 'accepted'],
+            'reason' => ['nullable', 'string', 'max:1000'],
+            'idempotency_key' => ['required', 'uuid'],
         ];
     }
 

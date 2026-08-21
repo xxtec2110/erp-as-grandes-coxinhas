@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Data\Stock\RecordStockMovementData;
+use App\Enums\ProductSalePaymentMethod;
 use App\Enums\StockMovementType;
 use App\Models\Location;
 use App\Models\Product;
@@ -28,9 +29,10 @@ class ProductSaleService
             $quantity = BigDecimal::of($data['quantity'])->toScale(6, RoundingMode::Unnecessary);
             $price = BigDecimal::of($data['unit_price'])->toScale(4, RoundingMode::Unnecessary);
             $total = $quantity->multipliedBy($price)->toScale(2, RoundingMode::HalfUp);
-            $method = $data['payment_method'] ?? 'cash';
-            $fee = $method === 'cash' ? null : $this->feeResolver->resolve((int) $data['acquirer_id'], (int) $data['card_brand_id'], $method, isset($data['installments']) ? (int) $data['installments'] : null, $data['operation_date']);
-            if ($method !== 'cash' && $fee === null) {
+            $method = ProductSalePaymentMethod::from($data['payment_method'] ?? ProductSalePaymentMethod::Cash->value);
+            $requiresCard = $method->requiresCardConfiguration();
+            $fee = $requiresCard ? $this->feeResolver->resolve((int) $data['acquirer_id'], (int) $data['card_brand_id'], $method->value, isset($data['installments']) ? (int) $data['installments'] : null, $data['operation_date']) : null;
+            if ($requiresCard && $fee === null) {
                 throw new DomainException('Nenhuma taxa vigente foi encontrada para esta forma de pagamento.');
             }
             $percentage = $fee?->fee_percentage ?? '0';
@@ -38,7 +40,7 @@ class ProductSaleService
             $financial = $this->feeCalculator->calculate((string) $total, $percentage, $fixedFee);
             $existing = ProductSale::query()->where('idempotency_key', $data['idempotency_key'])->first();
             if ($existing !== null) {
-                $same = $existing->product_id === (int) $data['product_id'] && $existing->location_id === (int) $data['location_id'] && $existing->quantity === (string) $quantity && $existing->unit_price === (string) $price && $existing->operation_date->toDateString() === $data['operation_date'] && $existing->payment_method === $method;
+                $same = $existing->product_id === (int) $data['product_id'] && $existing->location_id === (int) $data['location_id'] && $existing->quantity === (string) $quantity && $existing->unit_price === (string) $price && $existing->operation_date->toDateString() === $data['operation_date'] && $existing->payment_method === $method->value;
                 if (! $same) {
                     throw new DomainException('A chave idempotente já foi usada por outra venda.');
                 }
@@ -60,7 +62,7 @@ class ProductSaleService
             $totalCost = $costSnapshot === null ? null : BigDecimal::of($costSnapshot->unit_cost)->multipliedBy($quantity)->toScale(2, RoundingMode::HalfUp);
             $grossProfit = $totalCost === null ? null : $total->minus($totalCost)->toScale(2, RoundingMode::HalfUp);
             $grossMargin = $grossProfit === null || $total->isZero() ? null : $grossProfit->multipliedBy(100)->dividedBy($total, 4, RoundingMode::HalfUp);
-            $sale = ProductSale::query()->create(['product_id' => $data['product_id'], 'location_id' => $data['location_id'], 'acquirer_id' => $data['acquirer_id'] ?? null, 'card_brand_id' => $data['card_brand_id'] ?? null, 'payment_method' => $method, 'installments' => $data['installments'] ?? null, 'quantity' => (string) $quantity, 'unit_price' => (string) $price, 'total_amount' => (string) $total, 'gross_amount' => (string) $total, 'fee_percentage_snapshot' => $percentage, 'fixed_fee_snapshot' => $fixedFee, 'fee_amount_snapshot' => $financial['fee_amount'], 'net_amount' => $financial['net_amount'], 'payment_fee_id' => $fee?->id, 'product_cost_snapshot_id' => $costSnapshot?->id, 'unit_cost_snapshot' => $costSnapshot?->unit_cost, 'total_cost_snapshot' => $totalCost, 'gross_profit_snapshot' => $grossProfit, 'gross_margin_percentage_snapshot' => $grossMargin, 'operation_date' => $data['operation_date'], 'source' => $source, 'pdv_connection_id' => $data['pdv_connection_id'] ?? null, 'external_sale_id' => $data['external_sale_id'] ?? null, 'external_item_id' => $data['external_item_id'] ?? null, 'external_status' => $data['external_status'] ?? null, 'external_updated_at' => $data['external_updated_at'] ?? null, 'idempotency_key' => $data['idempotency_key'], 'created_by' => $user->id, 'notes' => $data['notes'] ?? null]);
+            $sale = ProductSale::query()->create(['product_id' => $data['product_id'], 'location_id' => $data['location_id'], 'acquirer_id' => $requiresCard ? $data['acquirer_id'] : null, 'card_brand_id' => $requiresCard ? $data['card_brand_id'] : null, 'payment_method' => $method->value, 'installments' => $requiresCard ? ($data['installments'] ?? null) : null, 'quantity' => (string) $quantity, 'unit_price' => (string) $price, 'total_amount' => (string) $total, 'gross_amount' => (string) $total, 'fee_percentage_snapshot' => $percentage, 'fixed_fee_snapshot' => $fixedFee, 'fee_amount_snapshot' => $financial['fee_amount'], 'net_amount' => $financial['net_amount'], 'payment_fee_id' => $fee?->id, 'product_cost_snapshot_id' => $costSnapshot?->id, 'unit_cost_snapshot' => $costSnapshot?->unit_cost, 'total_cost_snapshot' => $totalCost, 'gross_profit_snapshot' => $grossProfit, 'gross_margin_percentage_snapshot' => $grossMargin, 'operation_date' => $data['operation_date'], 'source' => $source, 'pdv_connection_id' => $data['pdv_connection_id'] ?? null, 'external_sale_id' => $data['external_sale_id'] ?? null, 'external_item_id' => $data['external_item_id'] ?? null, 'external_status' => $data['external_status'] ?? null, 'external_updated_at' => $data['external_updated_at'] ?? null, 'idempotency_key' => $data['idempotency_key'], 'created_by' => $user->id, 'notes' => $data['notes'] ?? null]);
             $this->movements->record(new RecordStockMovementData(productId: $sale->product_id, locationId: $sale->location_id, type: StockMovementType::Sale, quantityDelta: (string) $quantity->negated(), operationDate: $sale->operation_date->toDateString(), idempotencyKey: "sale:{$sale->id}:recorded", createdBy: $user->id, notes: "Venda #{$sale->id}", referenceType: ProductSale::class, referenceId: (string) $sale->id));
 
             return $sale->load(['product.category', 'location', 'creator']);

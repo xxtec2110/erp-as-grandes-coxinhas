@@ -39,6 +39,7 @@
             <form method="POST" action="{{ route('pdv.mappings.products.batch.preview', $connection) }}" class="space-y-3">
                 @csrf
                 <input type="hidden" name="from" value="{{ $from }}"><input type="hidden" name="to" value="{{ $to }}">
+                <input type="hidden" name="idempotency_key" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
                 @forelse ($catalog['products'] as $index => $row)
                     @php($suggested = $row['suggestion']['product'])
                     @php($autoVisibleId = in_array($row['suggestion']['type'], ['exact', 'alias'], true) ? $suggested?->id : null)
@@ -87,7 +88,7 @@
                     <div class="rounded-xl border bg-white p-8 text-center text-stone-500">Nenhum produto externo corresponde ao filtro.</div>
                 @endforelse
                 @if ($catalog['products']->isNotEmpty())
-                    <div class="sticky bottom-3 flex justify-end"><button class="rounded-lg bg-stone-900 px-5 py-3 font-bold text-white shadow-lg">Revisar mappings selecionados</button></div>
+                    <div class="sticky bottom-3 flex flex-wrap items-end justify-end gap-3 rounded-xl border bg-white/95 p-3 shadow-lg"><label class="min-w-64 flex-1 text-xs font-semibold">Motivo opcional da confirmação<input class="mt-1 w-full rounded-lg border-stone-300" name="reason" maxlength="1000" placeholder="Ex.: revisão do catálogo GrandChef"></label><button class="rounded-lg bg-stone-900 px-5 py-3 font-bold text-white">Revisar mappings selecionados</button></div>
                 @endif
             </form>
 
@@ -96,7 +97,26 @@
                     <h3 class="font-bold text-red-900">Produtos externos sem cadastro oficial</h3>
                     <div class="mt-3 grid gap-2 sm:grid-cols-2">
                         @foreach ($catalog['missing_products'] as $row)
-                            <div class="rounded-lg bg-white p-3 text-sm"><strong>{{ $row['description'] }}</strong><span class="block text-xs text-stone-500">Código {{ $row['external_product_code'] ?? '—' }} · {{ \App\Support\DecimalFormatter::format($row['quantity_total'], 2) }} vendidos · R$ {{ \App\Support\DecimalFormatter::format($row['value_total']) }} · {{ $row['order_count'] }} pedidos</span></div>
+                            <div class="rounded-lg bg-white p-4 text-sm">
+                                <strong>{{ $row['description'] }}</strong>
+                                <span class="block font-mono text-xs text-stone-500">Código {{ $row['external_product_code'] ?? '—' }} · ID {{ $row['external_product_id'] }}</span>
+                                <span class="mt-2 block text-xs text-stone-600">{{ \App\Support\DecimalFormatter::format($row['quantity_total'], 2) }} vendidos · R$ {{ \App\Support\DecimalFormatter::format($row['value_total']) }} · {{ $row['order_count'] }} pedidos</span>
+                                @if ($row['prices']['same'])
+                                    <span class="mt-1 block text-xs text-stone-600">Preço observado no GrandChef: R$ {{ \App\Support\DecimalFormatter::format($row['prices']['latest'], 2) }}</span>
+                                @else
+                                    <span class="mt-1 block text-xs text-stone-600">Preços: R$ {{ \App\Support\DecimalFormatter::format($row['prices']['minimum'], 2) }} a R$ {{ \App\Support\DecimalFormatter::format($row['prices']['maximum'], 2) }} · último R$ {{ \App\Support\DecimalFormatter::format($row['prices']['latest'], 2) }}</span>
+                                @endif
+                                @if ($row['suggested_category'])
+                                    <span class="mt-2 block text-xs font-bold text-emerald-800">Categoria sugerida, não salva: {{ $row['suggested_category']->name }}</span>
+                                @else
+                                    <span class="mt-2 block text-xs font-bold text-red-800">Categoria oficial para bebidas precisa ser definida.</span>
+                                @endif
+                                @if ($canCreateProducts)
+                                    <a class="mt-3 inline-flex rounded-lg border px-3 py-2 text-xs font-bold" href="{{ route('products.create', ['pdv_connection_id' => $connection->id, 'external_product_id' => $row['external_product_id'], 'onboarding_from' => $from, 'onboarding_to' => $to]) }}">Preparar cadastro oficial</a>
+                                @else
+                                    <span class="mt-3 block text-xs text-stone-500">É necessária a permissão products.create para o onboarding.</span>
+                                @endif
+                            </div>
                         @endforeach
                     </div>
                 </div>
@@ -105,8 +125,8 @@
 
         <section id="pagamentos" class="scroll-mt-6 space-y-4">
             <div><h2 class="text-2xl font-bold">Pagamentos externos</h2><p class="mt-1 text-sm text-stone-600">{{ $summary['payments_distinct'] }} formas distintas · split payment preservado por pedido.</p></div>
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                @foreach ([['Confirmados', $summary['payments_mapped']], ['Sem mapping', $summary['payments_unmapped']], ['Incompatíveis', $summary['payments_unsupported']], ['Sem taxa vigente', $summary['payments_rate_missing']]] as [$label, $value])
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                @foreach ([['Confirmados', $summary['payments_mapped']], ['Sem mapping', $summary['payments_unmapped']], ['Incompatíveis', $summary['payments_unsupported']], ['Sem configuração', $summary['payments_configuration_missing']], ['Sem taxa vigente', $summary['payments_rate_missing']]] as [$label, $value])
                     <div class="rounded-xl border bg-white p-4"><p class="text-xs font-bold uppercase tracking-wider text-stone-500">{{ $label }}</p><p class="mt-1 text-2xl font-bold">{{ $value }}</p></div>
                 @endforeach
             </div>
@@ -124,18 +144,21 @@
                             <form class="mt-4 space-y-3" method="POST" action="{{ route('pdv.mappings.payments.update', [$connection, $row['external_form_id']]) }}">
                                 @csrf @method('PUT')
                                 <input type="hidden" name="from" value="{{ $from }}"><input type="hidden" name="to" value="{{ $to }}">
+                                <input type="hidden" name="idempotency_key" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
                                 <input type="hidden" name="payment_method" value="{{ $row['compatibility']['method'] }}">
                                 <p class="rounded-lg bg-stone-50 p-3 text-sm"><strong>Representação ERP:</strong> {{ $row['compatibility']['label'] }}<span class="block text-xs text-stone-500">{{ $row['compatibility']['requires_rate'] ? 'Exige adquirente, bandeira e taxa vigente.' : 'Não exige adquirente, bandeira ou taxa.' }}</span></p>
                                 @if ($row['compatibility']['requires_acquirer'])
-                                    <div class="grid gap-3 sm:grid-cols-2">
-                                        <label class="text-sm font-semibold">Adquirente<select class="mt-1 w-full rounded-lg border-stone-300" name="acquirer_id" required><option value="">Selecione</option>@foreach ($acquirers as $item)<option value="{{ $item->id }}" @selected($row['mapping']?->acquirer_id === $item->id)>{{ $item->name }}</option>@endforeach</select></label>
-                                        <label class="text-sm font-semibold">Bandeira<select class="mt-1 w-full rounded-lg border-stone-300" name="card_brand_id" required><option value="">Selecione</option>@foreach ($cardBrands as $item)<option value="{{ $item->id }}" @selected($row['mapping']?->card_brand_id === $item->id)>{{ $item->name }}</option>@endforeach</select></label>
-                                    </div>
+                                    @if ($row['configuration_missing'])
+                                        <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"><strong>Configuração financeira necessária antes de confirmar.</strong><span class="mt-1 block">Cadastre uma taxa vigente para uma combinação real de adquirente e bandeira.</span><a class="mt-2 inline-flex font-bold underline" href="{{ route('payment-fees.batch') }}">Configurar taxas</a></div>
+                                    @else
+                                        <label class="text-sm font-semibold">Configuração financeira existente<select class="mt-1 w-full rounded-lg border-stone-300" name="financial_configuration" required><option value="">Selecione</option>@foreach ($row['financial_options'] as $fee)<option value="{{ $fee->acquirer_id }}:{{ $fee->card_brand_id }}" @selected($row['mapping']?->acquirer_id === $fee->acquirer_id && $row['mapping']?->card_brand_id === $fee->card_brand_id)>{{ $fee->acquirer->name }} · {{ $fee->cardBrand->name }} · {{ \App\Support\DecimalFormatter::format($fee->fee_percentage, 4) }}% + R$ {{ \App\Support\DecimalFormatter::format($fee->fixed_fee, 2) }}</option>@endforeach</select></label>
+                                    @endif
                                 @endif
                                 @if ($row['mapping_status'] === 'confirmed')
                                     <label class="flex items-start gap-2 text-xs text-red-800"><input class="mt-0.5 rounded" type="checkbox" name="confirm_remap" value="1">Confirmo a alteração explícita deste mapping.</label>
                                 @endif
-                                <button class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-bold text-white">Confirmar mapping financeiro</button>
+                                @if ($row['mapping_status'] === 'confirmed')<label class="block text-xs font-semibold">Motivo opcional da alteração<input class="mt-1 w-full rounded-lg border-stone-300" name="reason" maxlength="1000"></label>@endif
+                                <button class="rounded-lg bg-stone-900 px-4 py-2 text-sm font-bold text-white" @disabled($row['configuration_missing'])>Confirmar mapping financeiro</button>
                             </form>
                         @endif
                     </article>
@@ -145,6 +168,13 @@
 
         <section id="readiness" class="scroll-mt-6 space-y-4">
             <div><h2 class="text-2xl font-bold">Readiness operacional</h2><p class="mt-1 text-sm text-stone-600">Cálculo em tempo real. Blockers não são persistidos e nenhum pedido pode ser importado parcialmente.</p></div>
+            <div class="grid gap-3 lg:grid-cols-4">
+                @foreach ($operationalReadiness['steps'] as $step)
+                    <article @class(['rounded-xl border p-4', 'border-emerald-200 bg-emerald-50' => $step['status'] === 'ready', 'border-amber-200 bg-amber-50' => $step['status'] === 'attention', 'border-red-200 bg-red-50' => $step['status'] === 'blocked'])>
+                        <p class="text-xs font-bold uppercase tracking-wider">Etapa {{ $step['number'] }}</p><h3 class="mt-1 text-lg font-bold">{{ $step['label'] }}</h3><p class="mt-2 text-sm">{{ $step['detail'] }}</p>
+                    </article>
+                @endforeach
+            </div>
             <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 @foreach ([['Staged', $readinessSummary['staged'], 'bg-white'], ['READY', $readinessSummary['ready'], 'bg-emerald-50'], ['Bloqueados', $readinessSummary['blocked'], 'bg-red-50'], ['Split payments', $readinessSummary['split_payments'], 'bg-white'], ['Total', 'R$ '.\App\Support\DecimalFormatter::format($readinessSummary['total']), 'bg-white']] as [$label, $value, $class])
                     <div class="rounded-xl border p-4 {{ $class }}"><p class="text-xs font-bold uppercase tracking-wider text-stone-500">{{ $label }}</p><p class="mt-1 text-2xl font-bold">{{ $value }}</p></div>
@@ -174,11 +204,21 @@
                 <p class="mt-1 text-xs text-amber-900">Mappings confirmados usam o produto oficial; sugestões exatas/alias aparecem somente como simulação e não liberam pedidos.</p>
                 <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     @forelse ($catalog['stock_preview'] as $row)
-                        <div class="rounded-lg bg-white p-3 text-sm"><strong>{{ $row['product']->name }}</strong><span class="block text-xs text-stone-600">{{ $row['source'] === 'mapping_confirmed' ? 'Mapping confirmado' : 'Sugestão em preview' }} · necessidade {{ \App\Support\DecimalFormatter::format($row['required'], 2) }} · saldo {{ \App\Support\DecimalFormatter::format($row['available'], 2) }} · déficit {{ \App\Support\DecimalFormatter::format($row['deficit'], 2) }}</span></div>
+                        <div class="rounded-lg bg-white p-3 text-sm"><strong>{{ $row['product']->name }}</strong><span class="block text-xs text-stone-600">{{ $row['source'] === 'mapping_confirmed' ? 'Mapping confirmado' : 'Sugestão em preview' }} · necessidade {{ \App\Support\DecimalFormatter::format($row['required'], 2) }} · saldo {{ \App\Support\DecimalFormatter::format($row['available'], 2) }} · déficit {{ \App\Support\DecimalFormatter::format($row['deficit'], 2) }}</span>@if($row['opening_stock_available'])<a class="mt-2 inline-flex text-xs font-bold underline" href="{{ route('stock.opening.create', ['product_id' => $row['product']->id, 'location_id' => $connection->location_id]) }}">Informar estoque inicial</a>@endif</div>
                     @empty
                         <p class="text-sm text-amber-900">Nenhuma necessidade pode ser associada com segurança.</p>
                     @endforelse
                 </div>
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
+                <article class="rounded-xl border bg-white p-5"><h3 class="font-bold">Simulação sem persistência</h3><p class="mt-1 text-xs text-stone-500">Nenhum mapping, Product ou saldo é alterado por estes números.</p><dl class="mt-4 grid gap-2 text-sm"><div><dt class="font-semibold">Candidatos exatos/alias</dt><dd>{{ $operationalReadiness['simulation']['exact_or_alias_candidates'] }}</dd></div><div><dt class="font-semibold">Pedidos resolvidos em produtos se confirmados</dt><dd>{{ $operationalReadiness['simulation']['orders_product_ready_if_confirmed'] }}</dd></div><div><dt class="font-semibold">Ainda dependentes de produtos ausentes</dt><dd>{{ $operationalReadiness['simulation']['orders_still_missing_products'] }}</dd></div><div><dt class="font-semibold">Pedidos em que Pix deixa de ser incompatível</dt><dd>{{ $operationalReadiness['simulation']['pix_orders_no_longer_unsupported'] }}</dd></div></dl></article>
+                <article class="rounded-xl border bg-white p-5"><h3 class="font-bold">Próximas ações para liberar a operação</h3><ol class="mt-4 space-y-3">@foreach($operationalReadiness['next_actions'] as $action)<li class="flex gap-3 text-sm"><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xs font-bold text-white">{{ $action['priority'] }}</span><div><strong>{{ $action['label'] }}</strong><p class="text-xs text-stone-600">{{ $action['detail'] }}</p>@if($action['url'])<a class="mt-1 inline-flex text-xs font-bold underline" href="{{ $action['url'] }}">Abrir ação oficial</a>@endif</div></li>@endforeach</ol></article>
+            </div>
+
+            <div class="rounded-xl border bg-white p-5">
+                <h3 class="font-bold">Histórico auditável de mappings</h3><p class="mt-1 text-xs text-stone-500">Alterações explícitas registram usuário, conexão, before/after, ação e motivo. Credenciais nunca fazem parte deste histórico.</p>
+                <div class="mt-4 overflow-x-auto"><table class="min-w-full text-left text-sm"><thead><tr class="border-b"><th class="p-2">Quando</th><th class="p-2">Tipo/ação</th><th class="p-2">Identificador externo</th><th class="p-2">Responsável</th><th class="p-2">Motivo</th></tr></thead><tbody>@forelse($mappingAudits as $audit)<tr class="border-b"><td class="p-2">{{ $audit->confirmed_at?->setTimezone(config('app.timezone'))->format('d/m/Y H:i') }}</td><td class="p-2">{{ $audit->context['mapping_type'] ?? '—' }} · {{ $audit->context['action'] ?? '—' }}</td><td class="p-2 font-mono text-xs">{{ $audit->context['external_identifier'] ?? '—' }}</td><td class="p-2">{{ $audit->user?->name ?? 'Sistema' }}</td><td class="p-2">{{ $audit->context['reason'] ?? 'Não informado' }}</td></tr>@empty<tr><td colspan="5" class="p-4 text-center text-stone-500">Nenhuma confirmação real de mapping foi auditada ainda.</td></tr>@endforelse</tbody></table></div>
             </div>
 
             <a class="inline-flex rounded-lg border px-4 py-2 text-sm font-bold" href="{{ route('pdv.staging.index', [$connection, 'from' => $from, 'to' => $to]) }}">Abrir os {{ $readinessSummary['staged'] }} pedidos staged</a>

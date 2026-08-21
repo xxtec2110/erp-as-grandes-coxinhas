@@ -17,6 +17,8 @@ class PdvProductMappingRequest extends FormRequest
         return [
             'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('active', true)],
             'confirm_remap' => ['sometimes', 'accepted'],
+            'reason' => ['nullable', 'string', 'max:1000'],
+            'idempotency_key' => ['required', 'uuid'],
             'from' => ['required', 'date_format:Y-m-d'],
             'to' => ['required', 'date_format:Y-m-d', 'after_or_equal:from'],
         ];
