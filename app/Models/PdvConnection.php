@@ -55,6 +55,11 @@ class PdvConnection extends Model
         return $this->hasMany(PdvOrder::class);
     }
 
+    public function saleOrders(): HasMany
+    {
+        return $this->hasMany(ProductSaleOrder::class);
+    }
+
     public function integrationEvents(): HasMany
     {
         return $this->hasMany(PdvIntegrationEvent::class);

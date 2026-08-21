@@ -22,13 +22,15 @@ class PdvOperationalReadinessService
         $paymentsPending = $summary['payments_distinct'] - $summary['payments_mapped'];
         $stockDeficits = collect($catalog['stock_preview'])->filter(fn (array $row): bool => BigDecimal::of($row['deficit'])->isPositive());
         $simulation = $this->simulateExactMappings($connection, $from, $to, $catalog['products']);
+        $importEnabled = (bool) config('pdv.import_enabled', false);
+        $allReady = $readinessSummary['ready'] === $readinessSummary['staged'] && $readinessSummary['staged'] > 0;
 
         return [
             'steps' => [
                 ['number' => 1, 'label' => 'Produtos', 'status' => $productsPending === 0 && $summary['products_without_candidate'] === 0 ? 'ready' : 'attention', 'detail' => "{$summary['products_mapped']} mapeados · {$summary['products_without_candidate']} Products faltantes · {$productsPending} mappings pendentes"],
                 ['number' => 2, 'label' => 'Pagamentos', 'status' => $paymentsPending === 0 && $summary['payments_configuration_missing'] === 0 ? 'ready' : 'attention', 'detail' => "{$paymentsSupported} suportados · {$paymentsPending} mappings pendentes · {$summary['payments_configuration_missing']} sem configuração financeira"],
                 ['number' => 3, 'label' => 'Estoque', 'status' => $stockDeficits->isEmpty() && $summary['products_mapped'] > 0 ? 'ready' : 'attention', 'detail' => $summary['products_mapped'] === 0 ? 'Depende da confirmação humana dos mappings' : $stockDeficits->count().' Products com déficit'],
-                ['number' => 4, 'label' => 'Importação', 'status' => $readinessSummary['ready'] === $readinessSummary['staged'] && $readinessSummary['staged'] > 0 ? 'ready' : 'blocked', 'detail' => 'Permanece bloqueada; este incremento não importa vendas.'],
+                ['number' => 4, 'label' => 'Importação', 'status' => $allReady && $importEnabled ? 'ready' : 'blocked', 'detail' => ! $importEnabled ? 'Infraestrutura disponível, mas a feature flag operacional permanece OFF.' : ($allReady ? 'Pedidos liberados para confirmação humana.' : 'Aguardando a resolução dos blockers anteriores.')],
             ],
             'summary' => [
                 'products_existing' => $summary['products_distinct'] - $summary['products_without_candidate'],

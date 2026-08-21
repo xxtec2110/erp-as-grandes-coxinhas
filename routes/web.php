@@ -97,6 +97,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia', [PdvOrderController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.staging.index');
     Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/preparar', [PdvOrderController::class, 'prepare'])->middleware('permission:pdv.manage')->name('pdv.staging.prepare');
     Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/{order}', [PdvOrderController::class, 'show'])->middleware('permission:pdv.manage')->name('pdv.staging.show');
+    Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/{order}/importar', [PdvOrderController::class, 'confirmImport'])->middleware('permission:pdv.manage')->name('pdv.staging.import');
     Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos', [PdvMappingController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.mappings');
     Route::put('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos', [PdvMappingController::class, 'legacyUpdate'])->middleware('permission:pdv.manage')->name('pdv.mappings.update');
     Route::put('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos/produtos/{externalProductId}', [PdvMappingController::class, 'updateProduct'])->middleware('permission:pdv.manage')->name('pdv.mappings.products.update');

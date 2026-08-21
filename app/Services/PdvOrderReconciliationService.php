@@ -200,9 +200,16 @@ class PdvOrderReconciliationService
         $service = BigDecimal::of($order->service_total ?? '0');
         $delivery = BigDecimal::of($order->delivery_total ?? '0');
         $expectedFromItems = $itemTotal->plus($service)->plus($delivery);
-        $itemsMatch = $this->close($expectedFromItems, BigDecimal::of($order->total));
+        $expectedWithHeaderDiscount = $itemTotal->minus($order->discount_total)->plus($service)->plus($delivery);
+        $itemsMatch = $this->close($expectedFromItems, BigDecimal::of($order->total))
+            || $this->close($expectedWithHeaderDiscount, BigDecimal::of($order->total));
         if (! $itemsMatch) {
             $this->block($blockers, 'item_total_mismatch', 'A soma dos itens e adicionais diverge do total do pedido.');
+        }
+        if (! BigDecimal::of($order->discount_total)->isZero()
+            && ! $this->close($expectedFromItems, BigDecimal::of($order->total))
+            && $this->close($expectedWithHeaderDiscount, BigDecimal::of($order->total))) {
+            $warnings[] = ['code' => 'header_discount_requires_allocation', 'message' => 'O desconto do cabeçalho será alocado deterministicamente entre os itens no plano oficial.'];
         }
 
         $paymentsMatch = $order->paid_total === null || $this->close($paymentTotal, BigDecimal::of($order->paid_total));

@@ -38,6 +38,7 @@ class PdvIntegrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config()->set('pdv.import_enabled', true);
         $this->seed(AuthorizationSeeder::class);
         $this->admin = User::factory()->create();
         $this->location = Location::query()->create(['name' => 'Loja', 'type' => 'store', 'active' => true]);

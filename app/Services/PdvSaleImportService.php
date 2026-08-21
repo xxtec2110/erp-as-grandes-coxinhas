@@ -10,6 +10,7 @@ use App\Models\PdvProductMapping;
 use App\Models\ProductSale;
 use App\Models\User;
 use App\Pdv\Data\ExternalSaleData;
+use App\Pdv\IntegrationNotConfiguredException;
 use Illuminate\Support\Facades\DB;
 
 class PdvSaleImportService
@@ -19,6 +20,10 @@ class PdvSaleImportService
     /** @return array{status:string,sales:array<int,ProductSale>,missing:array<int,string>} */
     public function import(PdvConnection $connection, ExternalSaleData $data, User $user, ?PdvInboundEvent $inbound = null): array
     {
+        if (! config('pdv.import_enabled', false)) {
+            throw new IntegrationNotConfiguredException('A importação operacional de PDV está desabilitada. Use staging e confirmação humana.');
+        }
+
         return DB::transaction(function () use ($connection, $data, $user, $inbound): array {
             $connectionLocation = $this->access->assertOperationalScope($connection);
             $this->access->authorizeConnection($user, $connection);

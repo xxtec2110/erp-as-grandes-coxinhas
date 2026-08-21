@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PdvOrderImportRequest;
 use App\Http\Requests\PdvOrderPeriodRequest;
 use App\Models\PdvConnection;
 use App\Models\PdvOrder;
 use App\Pdv\GrandChefRequestException;
 use App\Pdv\IntegrationNotConfiguredException;
 use App\Services\PdvConnectionAccessService;
+use App\Services\PdvOrderImportPlanService;
+use App\Services\PdvOrderImportService;
 use App\Services\PdvOrderPreparationService;
 use App\Services\PdvOrderPreviewService;
 use Carbon\CarbonImmutable;
@@ -56,11 +59,27 @@ class PdvOrderController extends Controller
             ->with('success', "{$result['staged']} pedido(s) preparado(s) para conferência. Nenhuma venda ou baixa de estoque foi registrada.");
     }
 
-    public function show(Request $request, PdvConnection $connection, PdvOrder $order, PdvConnectionAccessService $access, PdvOrderPreviewService $preview): View
+    public function show(Request $request, PdvConnection $connection, PdvOrder $order, PdvConnectionAccessService $access, PdvOrderImportPlanService $plans): View
+    {
+        $access->authorizeConnection($request->user(), $connection);
+        abort_unless($order->pdv_connection_id === $connection->id, 404);
+        $importPlan = $plans->plan($order);
+
+        return view('pdv.staging.show', ['connection' => $connection, 'preview' => ['order' => $order, 'reconciliation' => $importPlan['reconciliation']], 'importPlan' => $importPlan]);
+    }
+
+    public function confirmImport(PdvOrderImportRequest $request, PdvConnection $connection, PdvOrder $order, PdvConnectionAccessService $access, PdvOrderImportService $imports): RedirectResponse
     {
         $access->authorizeConnection($request->user(), $connection);
         abort_unless($order->pdv_connection_id === $connection->id, 404);
 
-        return view('pdv.staging.show', ['connection' => $connection, 'preview' => $preview->order($order)]);
+        try {
+            $result = $imports->execute($order, $request->user());
+        } catch (IntegrationNotConfiguredException|DomainException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return redirect()->route('pdv.staging.show', [$connection, $order])
+            ->with('success', $result['status'] === 'imported' ? 'Pedido importado atomicamente.' : 'O pedido já possuía uma transação oficial; nenhum efeito foi duplicado.');
     }
 }

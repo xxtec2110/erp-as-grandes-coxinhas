@@ -86,4 +86,22 @@ Os identificadores permanecem escopados por conexão:
 
 ## Limites atuais
 
-Mutations, backfill amplo, webhook e importação oficial continuam fora deste incremento. O relatório é estritamente read-only e a contagem oficial de coxinhas continua dependendo de mappings confirmados por uma pessoa.
+Mutations, backfill amplo, webhook e ativação da importação real continuam fora deste incremento. O relatório permanece estritamente read-only e a contagem oficial de coxinhas continua dependendo de mappings confirmados por uma pessoa.
+
+## Transação oficial de venda
+
+O staging externo e o ledger operacional permanecem separados. `PdvOrder` registra o que o GrandChef informou; `ProductSaleOrder` nasce somente depois de um POST explícito de confirmação e representa o cabeçalho oficial do pedido. Cada item confirmado continua sendo gravado como `ProductSale` pelo `ProductSaleService`, que aciona o fluxo oficial do `StockMovementService`.
+
+`PdvOrderImportPlanService` produz um dry-run puro, sem persistência, contendo mappings, saldos consolidados por produto, itens, descontos, pagamentos, taxas, alocações, movimentos previstos, blockers e warnings. `PdvOrderImportService` recalcula esse plano dentro de uma transação, bloqueia a unidade e o pedido, e só então cria o cabeçalho, os itens, os pagamentos e as baixas de estoque. Qualquer falha reverte o pedido inteiro.
+
+O caminho oficial preserva todos os pagamentos em `ProductSalePayment`; não seleciona `payments[0]` nem elege um pagamento principal. A taxa é calculada uma vez sobre cada pagamento, com snapshots da configuração vigente. Dinheiro e Pix ficam sem taxa quando não existe configuração explícita. Troco é preservado no cabeçalho e retirado do valor oficial em dinheiro, portanto não vira receita.
+
+Como os relatórios precisam atribuir taxas aos produtos sem duplicar faturamento, `ProductSalePaymentAllocation` distribui bruto, receita, taxa e líquido entre os itens. A distribuição usa decimal exato e maior resto, com desempate estável pelo identificador externo. Assim, as parcelas fecham exatamente nos centavos do pagamento e a taxa fixa é aplicada somente uma vez.
+
+As constraints de `pdv_order_id`, `pdv_order_payment_id` e `idempotency_key`, combinadas com locks transacionais, impedem reimportação e efeitos duplicados. `PdvOrderReversalService` preserva os registros originais, cria movimentos e pagamentos inversos uma única vez e utiliza exclusivamente os snapshots importados. Mudanças posteriores de mapping ou `source_hash` não reescrevem silenciosamente o histórico.
+
+Importação em lote existe apenas como serviço interno e trata cada pedido em sua própria transação. Scheduler, backfill e importação automática continuam desativados.
+
+### Gate operacional
+
+`PDV_IMPORT_ENABLED` tem valor padrão `false`. Com a flag desligada, o preview permanece disponível, o botão de confirmação fica desabilitado e o backend recusa a operação. Ativar a flag não substitui os demais gates: todos os mappings, produtos, taxas obrigatórias, saldos, totais, permissões e escopo de unidade ainda precisam estar válidos.

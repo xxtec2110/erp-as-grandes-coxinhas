@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class PdvOrder extends Model
 {
@@ -56,5 +57,10 @@ class PdvOrder extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(PdvOrderPayment::class);
+    }
+
+    public function officialSaleOrder(): HasOne
+    {
+        return $this->hasOne(ProductSaleOrder::class);
     }
 }

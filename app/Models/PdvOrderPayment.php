@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class PdvOrderPayment extends Model
 {
@@ -26,5 +27,10 @@ class PdvOrderPayment extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(PdvOrder::class, 'pdv_order_id');
+    }
+
+    public function officialPayment(): HasOne
+    {
+        return $this->hasOne(ProductSalePayment::class);
     }
 }
