@@ -6,6 +6,7 @@ use App\Models\PdvOrder;
 use App\Models\ProductSaleOrder;
 use App\Models\ProductSalePayment;
 use App\Models\ProductSalePaymentAllocation;
+use App\Models\StockMovement;
 use App\Models\User;
 use App\Pdv\IntegrationNotConfiguredException;
 use Brick\Math\BigDecimal;
@@ -77,11 +78,24 @@ class PdvOrderReversalService
                 }
             }
 
+            $reversalPaymentIds = ProductSalePayment::query()
+                ->whereIn('reversal_of_id', $official->payments->whereNull('reversal_of_id')->pluck('id'))
+                ->pluck('id')->all();
+            $reversalMovementIds = StockMovement::query()
+                ->whereIn('idempotency_key', $official->sales->map(fn ($sale): string => "sale:{$sale->id}:cancelled"))
+                ->pluck('id')->all();
+
             $official->update(['status' => ProductSaleOrder::STATUS_REVERSED, 'reversed_at' => now(), 'reversed_by' => $user->id, 'reversal_reason' => $reason]);
             $locked->update(['processing_state' => PdvOrder::STATE_REVERSED, 'reversed_at' => now()]);
             $this->events->record('order_reversed', $connection, user: $user, status: 'reversed', metadata: [
                 'pdv_order_id' => $locked->id,
+                'external_order_id' => $locked->external_order_id,
+                'location_id' => $official->location_id,
                 'product_sale_order_id' => $official->id,
+                'product_sale_ids' => $official->sales->pluck('id')->all(),
+                'reversal_payment_ids' => $reversalPaymentIds,
+                'reversal_stock_movement_ids' => $reversalMovementIds,
+                'reason' => $reason,
             ]);
 
             return $official->refresh()->load(['sales', 'payments.allocations']);

@@ -95,14 +95,14 @@ class PdvProductOnboardingService
         ];
     }
 
-    private function suggestedName(string $description): string
+    public function suggestedName(string $description): string
     {
         $withoutCode = preg_replace('/^\s*\d+\s*[-–—]\s*/u', '', trim($description)) ?: trim($description);
 
         return Str::title(mb_strtolower($withoutCode));
     }
 
-    private function isBeverage(string $value): bool
+    public function isBeverage(string $value): bool
     {
         $normalized = $this->normalize($value);
 

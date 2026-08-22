@@ -12,7 +12,7 @@ use Throwable;
 
 class PdvSyncService
 {
-    public function __construct(private PdvProviderManager $providers, private PdvInboundService $inbound, private PdvSaleImportService $imports, private PdvIntegrationEventService $events, private PdvConnectionAccessService $access) {}
+    public function __construct(private PdvProviderManager $providers, private PdvInboundService $inbound, private PdvSaleImportService $imports, private PdvOrderStagingService $staging, private PdvIntegrationEventService $events, private PdvConnectionAccessService $access) {}
 
     public function sync(PdvConnection $connection, User $user, ?CarbonImmutable $from = null, ?CarbonImmutable $to = null): array
     {
@@ -27,12 +27,18 @@ class PdvSyncService
         $this->events->record('sync_started', $connection, user: $user, status: 'running');
         try {
             $page = $this->providers->for($connection)->fetchSales($connection, $checkpoint->cursor, $from, $to);
-            $result = ['imported' => 0, 'waiting_mapping' => 0];
+            $result = ['staged' => 0, 'imported' => 0, 'waiting_mapping' => 0];
             foreach ($page->items as $sale) {
                 $eventId = $this->inbound->syntheticEventId($connection->provider, $sale->externalSaleId, 'sale.updated', $sale->updatedAt->toIso8601String());
                 $event = $this->inbound->receive($connection, $eventId, 'sale.updated', ['normalized' => true], $sale->externalSaleId);
-                $outcome = $this->imports->import($connection, $sale, $user, $event);
-                $result[$outcome['status']] = ($result[$outcome['status']] ?? 0) + 1;
+                if ($connection->provider === 'grandchef') {
+                    $this->staging->stage($connection, $sale);
+                    $event->update(['status' => 'received', 'error_code' => null, 'error_message' => null]);
+                    $result['staged']++;
+                } else {
+                    $outcome = $this->imports->import($connection, $sale, $user, $event);
+                    $result[$outcome['status']] = ($result[$outcome['status']] ?? 0) + 1;
+                }
             }
             $checkpoint->update(['cursor' => $page->nextCursor, 'last_success_at' => now(), 'last_error' => null]);
             $connection->update(['last_success_at' => now(), 'status' => 'healthy']);

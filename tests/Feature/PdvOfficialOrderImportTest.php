@@ -9,6 +9,7 @@ use App\Models\CardBrand;
 use App\Models\Location;
 use App\Models\PaymentFee;
 use App\Models\PdvConnection;
+use App\Models\PdvIntegrationEvent;
 use App\Models\PdvOrder;
 use App\Models\PdvOrderItem;
 use App\Models\PdvOrderPayment;
@@ -26,6 +27,7 @@ use App\Pdv\IntegrationNotConfiguredException;
 use App\Pdv\PdvOrderImportBlockedException;
 use App\Services\MoneyAllocationService;
 use App\Services\PaymentFeeReportService;
+use App\Services\PdvOrderBatchImportService;
 use App\Services\PdvOrderImportPlanService;
 use App\Services\PdvOrderImportService;
 use App\Services\PdvOrderReversalService;
@@ -91,6 +93,8 @@ class PdvOfficialOrderImportTest extends TestCase
         $this->assertFalse($plan['import_enabled']);
         $this->assertCount(3, $plan['items']);
         $this->assertCount(2, $plan['payments']);
+        $this->assertSame(['order_headers' => 1, 'product_sales' => 3, 'payments' => 2, 'stock_movements' => 3], $plan['planned_counts']);
+        $this->assertSame('9.000000', $plan['stock_after'][0]['balance_after']);
         $this->assertSame($before, $this->officialCounts());
 
         config()->set('pdv.import_enabled', true);
@@ -111,6 +115,13 @@ class PdvOfficialOrderImportTest extends TestCase
         $this->assertSame('9.000000', app(StockBalanceService::class)->balance($this->products['P1'], $this->location));
         $this->assertSame('8.000000', app(StockBalanceService::class)->balance($this->products['P2'], $this->location));
         $this->assertSame('7.000000', app(StockBalanceService::class)->balance($this->products['P3'], $this->location));
+        $event = PdvIntegrationEvent::query()->where('event_type', 'order_imported')->firstOrFail();
+        $this->assertSame($this->admin->id, $event->user_id);
+        $this->assertSame($this->location->id, $event->metadata['location_id']);
+        $this->assertSame($order->external_order_id, $event->metadata['external_order_id']);
+        $this->assertCount(3, $event->metadata['product_sale_ids']);
+        $this->assertCount(2, $event->metadata['product_sale_payment_ids']);
+        $this->assertCount(3, $event->metadata['stock_movement_ids']);
     }
 
     public function test_credit_plus_pix_calculates_percentage_and_fixed_fee_once_on_credit_payment(): void
@@ -346,6 +357,12 @@ class PdvOfficialOrderImportTest extends TestCase
         $financial = app(PaymentFeeReportService::class)->summarize($this->location, '2026-08-20', '2026-08-20');
         $this->assertSame('0', $financial['gross']);
         $this->assertSame('0', $financial['net']);
+        $event = PdvIntegrationEvent::query()->where('event_type', 'order_reversed')->firstOrFail();
+        $this->assertSame($this->admin->id, $event->user_id);
+        $this->assertSame($this->location->id, $event->metadata['location_id']);
+        $this->assertSame('Cancelamento de teste', $event->metadata['reason']);
+        $this->assertCount(1, $event->metadata['reversal_payment_ids']);
+        $this->assertCount(1, $event->metadata['reversal_stock_movement_ids']);
     }
 
     public function test_reports_use_items_for_product_revenue_and_payments_for_financial_totals_without_doubling(): void
@@ -374,10 +391,41 @@ class PdvOfficialOrderImportTest extends TestCase
         $order = $this->order([$this->item('I1', 'P1', '1', '10', '10')], [$this->payment('PAY', 'CASH', 'Dinheiro', 'dinheiro', '10')], '10');
         $this->actingAs($this->admin)->get(route('pdv.staging.show', [$this->connection, $order]))
             ->assertOk()->assertSee('Importação operacional desabilitada')->assertSee('PDV_IMPORT_ENABLED=false', false);
-        $this->actingAs($this->admin)->post(route('pdv.staging.import', [$this->connection, $order]), ['confirmed' => 1])
+        $this->actingAs($this->admin)->post(route('pdv.staging.import', [$this->connection, $order]), ['confirmed' => 1, 'single_order_confirmed' => 1, 'confirmation_text' => 'IMPORTAR'])
             ->assertRedirect()->assertSessionHas('error', 'A importação operacional de PDV está desabilitada.');
         $this->expectException(IntegrationNotConfiguredException::class);
         app(PdvOrderImportService::class)->execute($order, $this->admin);
+    }
+
+    public function test_first_go_live_batch_guard_rejects_more_than_one_order_before_any_write(): void
+    {
+        $first = $this->order([$this->item('I1', 'P1', '1', '10', '10')], [$this->payment('PAY', 'CASH', 'Dinheiro', 'dinheiro', '10')], '10');
+        $second = $first->replicate();
+        $second->external_order_id = 'ORDER-TEST-2';
+        $second->external_code = '1002';
+        $second->save();
+        config()->set('pdv.first_import_single_order', true);
+        config()->set('pdv.import_enabled', true);
+
+        try {
+            app(PdvOrderBatchImportService::class)->execute(collect([$first, $second]), $this->admin);
+            $this->fail('O lote inicial com mais de um pedido deveria ser bloqueado.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('somente um pedido', $exception->getMessage());
+        }
+        $this->assertDatabaseCount('product_sale_orders', 0);
+        $this->assertDatabaseCount('product_sales', 0);
+    }
+
+    public function test_import_route_requires_two_checkboxes_and_exact_confirmation_text(): void
+    {
+        $order = $this->order([$this->item('I1', 'P1', '1', '10', '10')], [$this->payment('PAY', 'CASH', 'Dinheiro', 'dinheiro', '10')], '10');
+        config()->set('pdv.import_enabled', true);
+
+        $this->actingAs($this->admin)->post(route('pdv.staging.import', [$this->connection, $order]), ['confirmed' => 1, 'confirmation_text' => 'importar'])
+            ->assertSessionHasErrors(['single_order_confirmed', 'confirmation_text']);
+        $this->assertDatabaseCount('product_sale_orders', 0);
+        $this->assertDatabaseCount('product_sales', 0);
     }
 
     public function test_cross_location_user_cannot_preview_or_import(): void
@@ -387,7 +435,7 @@ class PdvOfficialOrderImportTest extends TestCase
         $restricted->permissions()->attach(Permission::query()->where('name', 'pdv.manage')->firstOrFail(), ['allowed' => true]);
         $restricted->locations()->attach($this->otherLocation->id);
         $this->actingAs($restricted)->get(route('pdv.staging.show', [$this->connection, $order]))->assertForbidden();
-        $this->actingAs($restricted)->post(route('pdv.staging.import', [$this->connection, $order]), ['confirmed' => 1])->assertForbidden();
+        $this->actingAs($restricted)->post(route('pdv.staging.import', [$this->connection, $order]), ['confirmed' => 1, 'single_order_confirmed' => 1, 'confirmation_text' => 'IMPORTAR'])->assertForbidden();
         $this->assertDatabaseCount('product_sale_orders', 0);
     }
 

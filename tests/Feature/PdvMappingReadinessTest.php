@@ -22,10 +22,12 @@ use App\Models\ProductSale;
 use App\Models\StockMovement;
 use App\Models\User;
 use App\Services\PdvExternalProductSuggestionService;
+use App\Services\PdvGoLiveService;
 use App\Services\PdvMappingCatalogService;
 use App\Services\PdvMappingService;
 use App\Services\PdvOrderReconciliationService;
 use App\Services\PdvPaymentCompatibilityService;
+use App\Services\PdvProductBatchOnboardingService;
 use App\Services\StockMovementService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\AuthorizationSeeder;
@@ -353,6 +355,94 @@ class PdvMappingReadinessTest extends TestCase
         $this->actingAs($this->admin)->get(route('pdv.mappings', [$this->ibiraConnection, 'from' => '2026-08-20', 'to' => '2026-08-20']))
             ->assertOk()->assertSee('Etapa 1')->assertSee('Próximas ações para liberar a operação')->assertSee('Pedidos em que Pix deixa de ser incompatível')->assertSee('Pix')->assertDontSee('Importar venda');
         $this->assertSame($before, $this->integrityCounts());
+    }
+
+    public function test_go_live_dashboard_is_derived_read_only_scoped_and_does_not_treat_suggestions_as_stock(): void
+    {
+        $this->product('Frango com catupiry');
+        $this->order($this->ibiraConnection, 'IB-1', [
+            $this->item('I-1', 'P-FRANGO', '33', 'Coxinha de frango com catupiry', '1', '16'),
+            $this->item('I-2', 'P-AGUA', '70', 'Água de coco', '1', '12'),
+        ], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '28')], '28');
+        $this->ibiraConnection->update(['encrypted_credentials' => ['bearer_token' => 'never-render-bearer', 'device_token' => 'never-render-device']]);
+        $before = $this->integrityCounts();
+        $url = route('pdv.go-live', [$this->ibiraConnection, 'from' => '2026-08-20', 'to' => '2026-08-20']);
+
+        $this->get($url)->assertRedirect(route('login'));
+        $restricted = User::factory()->unprivileged()->create();
+        $restricted->permissions()->attach(Permission::query()->where('name', 'pdv.manage')->firstOrFail(), ['allowed' => true]);
+        $this->actingAs($restricted)->get($url)->assertForbidden();
+        $restricted->locations()->attach($this->ibira);
+        $this->actingAs($restricted)->get($url)->assertOk();
+        $this->actingAs($restricted)->get(route('pdv.go-live', [$this->catanduvaConnection, 'from' => '2026-08-20', 'to' => '2026-08-20']))->assertForbidden();
+        $response = $this->actingAs($this->admin)->get($url)
+            ->assertOk()->assertSee('Preparar GrandChef para operação')->assertSee('can_enable_import=false')
+            ->assertSee('Água de coco')->assertSee('Nenhuma linha vem selecionada')
+            ->assertDontSee('never-render-bearer')->assertDontSee('never-render-device');
+        $this->assertStringNotContainsString('name="rows[1][selected]" value="1" checked', $response->getContent());
+        $readModel = app(PdvGoLiveService::class)->build($this->ibiraConnection, CarbonImmutable::parse('2026-08-20'), CarbonImmutable::parse('2026-08-20'));
+        $this->assertSame(2, $readModel['catalog']['summary']['products_distinct']);
+        $this->assertSame(1, $readModel['catalog']['summary']['products_exact']);
+        $this->assertSame(1, $readModel['catalog']['summary']['products_without_candidate']);
+        $this->assertCount(0, $readModel['catalog']['stock_preview']);
+        $this->assertFalse($readModel['can_enable_import']);
+        $this->assertSame($before, $this->integrityCounts());
+    }
+
+    public function test_batch_product_onboarding_requires_preview_and_explicit_confirmation_without_auto_mapping(): void
+    {
+        $beverages = ProductCategory::query()->create(['name' => 'Bebidas', 'active' => true]);
+        $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'BEB-1', '70', '01- ÁGUA DE COCO', '2', '24')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '24')], '24');
+        $payload = ['from' => '2026-08-20', 'to' => '2026-08-20', 'rows' => [[
+            'selected' => 1,
+            'external_product_id' => 'BEB-1',
+            'name' => 'Água de Coco',
+            'product_category_id' => $beverages->id,
+            'selling_price' => '12.00',
+            'active' => 1,
+        ]]];
+
+        $this->actingAs($this->admin)->post(route('pdv.go-live.products.preview', $this->ibiraConnection), $payload)
+            ->assertOk()->assertSee('Nada foi gravado')->assertSee('Água de Coco')->assertSee('CRIAR PRODUTOS');
+        $this->assertDatabaseMissing('products', ['name' => 'Água de Coco']);
+
+        $preview = app(PdvProductBatchOnboardingService::class)->preview(
+            $this->ibiraConnection,
+            $this->admin,
+            CarbonImmutable::parse('2026-08-20'),
+            CarbonImmutable::parse('2026-08-20'),
+            $payload['rows'],
+        );
+        $this->actingAs($this->admin)->post(route('pdv.go-live.products.confirm', $this->ibiraConnection), [
+            'preview_token' => $preview['token'], 'confirmed' => 1, 'confirmation_text' => 'INCORRETO',
+        ])->assertSessionHasErrors('confirmation_text');
+        $this->assertDatabaseMissing('products', ['name' => 'Água de Coco']);
+
+        $this->actingAs($this->admin)->post(route('pdv.go-live.products.confirm', $this->ibiraConnection), [
+            'preview_token' => $preview['token'], 'confirmed' => 1, 'confirmation_text' => 'CRIAR PRODUTOS',
+        ])->assertRedirect(route('pdv.go-live', $this->ibiraConnection));
+        $product = Product::query()->where('name', 'Água de Coco')->firstOrFail();
+        $this->assertSame($beverages->id, $product->product_category_id);
+        $this->assertDatabaseHas('product_prices', ['product_id' => $product->id, 'price' => '12.0000', 'is_current' => true, 'source' => 'pdv_onboarding_batch']);
+        $this->assertDatabaseCount('pdv_product_mappings', 0);
+        $this->assertDatabaseCount('product_sales', 0);
+        $this->assertDatabaseCount('stock_movements', 0);
+    }
+
+    public function test_go_live_gate_becomes_ready_only_after_confirmed_mappings_rates_and_stock(): void
+    {
+        $product = $this->product('Frango com catupiry');
+        $this->order($this->ibiraConnection, 'IB-1', [$this->item('I-1', 'P1', '33', 'Coxinha de frango com catupiry', '1', '16')], [$this->payment('PAY-1', '99900', 'Dinheiro', 'dinheiro', '16')], '16');
+        $this->confirmProduct($this->ibiraConnection, 'P1', $product->id);
+        $this->confirmPayment($this->ibiraConnection, '99900', ['payment_method' => 'cash']);
+        $this->stock($product, '10');
+
+        $readModel = app(PdvGoLiveService::class)->build($this->ibiraConnection, CarbonImmutable::parse('2026-08-20'), CarbonImmutable::parse('2026-08-20'));
+        $this->assertTrue($readModel['can_enable_import']);
+        $this->assertFalse($readModel['import_enabled']);
+        $this->assertFalse($readModel['can_execute_import']);
+        $this->assertSame(1, $readModel['dry_run_summary']['ready']);
+        $this->assertSame(0, $readModel['dry_run_summary']['blocked']);
     }
 
     /** @return array<string,mixed> */

@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Models\Location;
 use App\Models\PdvOrder;
+use App\Models\ProductSale;
 use App\Models\ProductSaleOrder;
 use App\Models\ProductSalePayment;
 use App\Models\ProductSalePaymentAllocation;
+use App\Models\StockMovement;
 use App\Models\User;
 use App\Pdv\IntegrationNotConfiguredException;
 use App\Pdv\PdvOrderImportBlockedException;
@@ -144,10 +146,20 @@ class PdvOrderImportService
                 }
 
                 $this->assertPersistedSums($official, count($plan['items']));
+                $official->load(['sales', 'payments.allocations']);
+                $movementIds = StockMovement::query()
+                    ->where('reference_type', ProductSale::class)
+                    ->whereIn('reference_id', $official->sales->pluck('id')->map(fn (int $id): string => (string) $id))
+                    ->pluck('id')->all();
                 $locked->update(['processing_state' => PdvOrder::STATE_IMPORTED, 'imported_at' => now()]);
                 $this->events->record('order_imported', $connection, user: $user, status: 'imported', metadata: [
                     'pdv_order_id' => $locked->id,
+                    'external_order_id' => $locked->external_order_id,
+                    'location_id' => $location->id,
                     'product_sale_order_id' => $official->id,
+                    'product_sale_ids' => $official->sales->pluck('id')->all(),
+                    'product_sale_payment_ids' => $official->payments->pluck('id')->all(),
+                    'stock_movement_ids' => $movementIds,
                     'items' => count($plan['items']),
                     'payments' => count($plan['payments']),
                 ]);

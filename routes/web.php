@@ -26,6 +26,7 @@ use App\Http\Controllers\OpeningStockController;
 use App\Http\Controllers\OperationalReadinessController;
 use App\Http\Controllers\OperationalReportController;
 use App\Http\Controllers\PaymentFeeController;
+use App\Http\Controllers\PdvGoLiveController;
 use App\Http\Controllers\PdvIntegrationController;
 use App\Http\Controllers\PdvMappingController;
 use App\Http\Controllers\PdvOrderController;
@@ -98,6 +99,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/preparar', [PdvOrderController::class, 'prepare'])->middleware('permission:pdv.manage')->name('pdv.staging.prepare');
     Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/{order}', [PdvOrderController::class, 'show'])->middleware('permission:pdv.manage')->name('pdv.staging.show');
     Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/conferencia/{order}/importar', [PdvOrderController::class, 'confirmImport'])->middleware('permission:pdv.manage')->name('pdv.staging.import');
+    Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/go-live', [PdvGoLiveController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.go-live');
+    Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/go-live/produtos/previa', [PdvGoLiveController::class, 'previewProducts'])->middleware(['permission:pdv.manage', 'permission:products.create'])->name('pdv.go-live.products.preview');
+    Route::post('/configuracoes/integracoes/grandchef/conexoes/{connection}/go-live/produtos/confirmar', [PdvGoLiveController::class, 'confirmProducts'])->middleware(['permission:pdv.manage', 'permission:products.create'])->name('pdv.go-live.products.confirm');
     Route::get('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos', [PdvMappingController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.mappings');
     Route::put('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos', [PdvMappingController::class, 'legacyUpdate'])->middleware('permission:pdv.manage')->name('pdv.mappings.update');
     Route::put('/configuracoes/integracoes/grandchef/conexoes/{connection}/mapeamentos/produtos/{externalProductId}', [PdvMappingController::class, 'updateProduct'])->middleware('permission:pdv.manage')->name('pdv.mappings.products.update');

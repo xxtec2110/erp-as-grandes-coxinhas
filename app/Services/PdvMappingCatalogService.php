@@ -97,7 +97,9 @@ class PdvMappingCatalogService
                 $mapping = $mappings->get($row->external_product_id);
                 $suggestion = $this->suggestions->suggest((string) $row->description, $erpProducts);
                 $mappingStatus = $mapping?->status === 'confirmed' && $mapping->product_id !== null ? 'confirmed' : ($mapping?->status ?? 'unmapped');
-                $stockProduct = $mappingStatus === 'confirmed' ? $mapping?->product : (in_array($suggestion['type'], ['exact', 'alias'], true) ? $suggestion['product'] : null);
+                // Estoque físico só pode ser associado depois de um mapping humano confirmado.
+                // Sugestões exatas/alias continuam sendo apenas auxiliares de decisão.
+                $stockProduct = $mappingStatus === 'confirmed' ? $mapping?->product : null;
                 $stockPreview = null;
                 if ($stockProduct !== null) {
                     $available = $stock[$stockProduct->id] ??= $this->balances->balance($stockProduct->id, (int) $connection->location_id);
@@ -106,7 +108,7 @@ class PdvMappingCatalogService
                     $deficit = $deficit->isNegative() ? $deficit->abs() : BigDecimal::zero();
                     $stockPreview = [
                         'product' => $stockProduct,
-                        'source' => $mappingStatus === 'confirmed' ? 'mapping_confirmed' : 'suggestion_preview',
+                        'source' => 'mapping_confirmed',
                         'required' => (string) $required,
                         'available' => (string) BigDecimal::of($available)->toScale(6, RoundingMode::HalfUp),
                         'deficit' => (string) $deficit->toScale(6, RoundingMode::HalfUp),
@@ -129,7 +131,10 @@ class PdvMappingCatalogService
                     'suggestion' => $suggestion,
                     'stock_preview' => $stockPreview,
                     'prices' => $this->onboarding->priceDetails($priceObservations->get($row->external_product_id, collect())),
+                    'suggested_name' => $this->onboarding->suggestedName((string) $row->description),
                     'suggested_category' => $this->onboarding->suggestedCategory((string) $row->description, $categories),
+                    'category_gate' => $this->onboarding->isBeverage((string) $row->description)
+                        && $this->onboarding->suggestedCategory((string) $row->description, $categories) === null,
                 ];
             })->values();
     }

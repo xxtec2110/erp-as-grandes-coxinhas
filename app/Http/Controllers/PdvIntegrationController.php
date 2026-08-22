@@ -19,8 +19,10 @@ use App\Services\AuthorizationService;
 use App\Services\PdvConnectionAccessService;
 use App\Services\PdvConnectionService;
 use App\Services\PdvConnectionTestService;
+use App\Services\PdvOrderStagingService;
 use App\Services\PdvSaleImportService;
 use App\Services\PdvSyncService;
+use DomainException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -84,7 +86,7 @@ class PdvIntegrationController extends Controller
             $tests->test($connection, $request->user());
 
             return back()->with('success', 'Conexão GrandChef validada com resposta GraphQL real.');
-        } catch (GrandChefRequestException|IntegrationNotConfiguredException $exception) {
+        } catch (DomainException|GrandChefRequestException|IntegrationNotConfiguredException $exception) {
             return back()->with('error', $exception->getMessage());
         }
     }
@@ -94,8 +96,8 @@ class PdvIntegrationController extends Controller
         try {
             $result = $sync->sync($connection, $request->user());
 
-            return back()->with('success', "Sincronização concluída: {$result['imported']} venda(s).");
-        } catch (GrandChefRequestException|IntegrationNotConfiguredException $exception) {
+            return back()->with('success', "Sincronização concluída: {$result['staged']} pedido(s) no staging e {$result['imported']} venda(s) legada(s).");
+        } catch (DomainException|GrandChefRequestException|IntegrationNotConfiguredException $exception) {
             return back()->with('error', $exception->getMessage());
         }
     }
@@ -107,7 +109,7 @@ class PdvIntegrationController extends Controller
         return view('pdv.events', ['connection' => $connection, 'events' => PdvIntegrationEvent::query()->where('pdv_connection_id', $connection->id)->latest()->paginate(30)]);
     }
 
-    public function reprocess(PdvInboundEvent $event, PdvProviderManager $providers, PdvSaleImportService $imports, Request $request, PdvConnectionAccessService $access): RedirectResponse
+    public function reprocess(PdvInboundEvent $event, PdvProviderManager $providers, PdvSaleImportService $imports, PdvOrderStagingService $staging, Request $request, PdvConnectionAccessService $access): RedirectResponse
     {
         $access->authorizeConnection($request->user(), $event->connection);
         try {
@@ -115,10 +117,17 @@ class PdvIntegrationController extends Controller
             if (! $sale) {
                 return back()->with('success', 'Venda externa não encontrada.');
             }
-            $imports->import($event->connection, $sale, $request->user(), $event);
+            if ($event->connection->provider === 'grandchef') {
+                $staging->stage($event->connection, $sale);
+                $event->update(['status' => 'received', 'error_code' => null, 'error_message' => null]);
+            } else {
+                $imports->import($event->connection, $sale, $request->user(), $event);
+            }
 
-            return back()->with('success', 'Evento reprocessado com idempotência.');
-        } catch (GrandChefRequestException|IntegrationNotConfiguredException $exception) {
+            return back()->with('success', $event->connection->provider === 'grandchef'
+                ? 'Evento reprocessado no staging; nenhuma venda ou baixa de estoque foi criada.'
+                : 'Evento reprocessado com idempotência.');
+        } catch (GrandChefRequestException|IntegrationNotConfiguredException|DomainException $exception) {
             return back()->with('error', $exception->getMessage());
         }
     }

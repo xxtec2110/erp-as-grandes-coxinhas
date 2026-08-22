@@ -44,6 +44,7 @@
                             </div>
                         @endif
                         <div class="mt-5 flex flex-wrap gap-2">
+                            <a href="{{ route('pdv.go-live', $connection) }}" class="rounded-lg bg-amber-700 px-3 py-2 text-sm font-bold text-white">Preparar operação</a>
                             <a href="{{ route('pdv.connections.edit', $connection) }}" class="rounded-lg bg-stone-900 px-3 py-2 text-sm font-bold text-white">Editar</a>
                             <form method="POST" action="{{ route('pdv.test', $connection) }}">@csrf<button class="rounded-lg border px-3 py-2 text-sm font-bold">Testar conexão</button></form>
                             <a href="{{ route('pdv.reports.sales', $connection) }}" class="rounded-lg border px-3 py-2 text-sm font-bold">Consultar vendas</a>

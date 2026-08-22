@@ -31,6 +31,13 @@ class PdvOrderImportPlanService
         $items = $this->attachItemFinancials($itemPlan['items'], $paymentPlan['payments']);
         $ready = $blockers === [];
         $enabled = (bool) config('pdv.import_enabled', false);
+        $stockAfter = collect($reconciliation['stock_status']['products'] ?? [])->map(fn (array $row): array => [
+            'product' => $row['product'],
+            'required' => $row['required'],
+            'available' => $row['available'],
+            'balance_after' => (string) BigDecimal::of($row['available'])->minus($row['required'])->toScale(6, RoundingMode::HalfUp),
+            'valid' => $row['valid'],
+        ])->values()->all();
 
         return [
             'order' => $order,
@@ -43,6 +50,13 @@ class PdvOrderImportPlanService
                 'quantity_delta' => (string) BigDecimal::of($item['quantity'])->negated(),
                 'location_id' => $order->location_id,
             ])->all(),
+            'stock_after' => $stockAfter,
+            'planned_counts' => [
+                'order_headers' => $ready ? 1 : 0,
+                'product_sales' => count($items),
+                'payments' => count($paymentPlan['payments']),
+                'stock_movements' => count($items),
+            ],
             'totals' => [
                 'product_revenue' => $this->money($itemPlan['product_revenue']),
                 'discount_allocated' => $this->money($itemPlan['discount_allocated']),

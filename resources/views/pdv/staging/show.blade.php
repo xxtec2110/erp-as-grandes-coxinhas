@@ -88,16 +88,33 @@
             </div>
         </section>
 
+        <section class="rounded-xl border border-amber-200 bg-amber-50 p-5">
+            <h2 class="text-xl font-bold">SE ESTA VENDA FOSSE IMPORTADA</h2>
+            <p class="mt-1 text-sm text-stone-600">Plano determinístico recalculado agora; nenhuma linha abaixo foi persistida.</p>
+            <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div><dt class="text-stone-500">Cabeçalho oficial</dt><dd class="text-2xl font-bold">{{ $importPlan['planned_counts']['order_headers'] }}</dd></div>
+                <div><dt class="text-stone-500">ProductSales</dt><dd class="text-2xl font-bold">{{ $importPlan['planned_counts']['product_sales'] }}</dd></div>
+                <div><dt class="text-stone-500">Pagamentos</dt><dd class="text-2xl font-bold">{{ $importPlan['planned_counts']['payments'] }}</dd></div>
+                <div><dt class="text-stone-500">Movimentos</dt><dd class="text-2xl font-bold">{{ $importPlan['planned_counts']['stock_movements'] }}</dd></div>
+                <div><dt class="text-stone-500">Taxas</dt><dd class="font-bold">R$ {{ \App\Support\DecimalFormatter::format($importPlan['totals']['payment_fee']) }}</dd></div>
+                <div><dt class="text-stone-500">Líquido</dt><dd class="font-bold">R$ {{ \App\Support\DecimalFormatter::format($importPlan['totals']['payment_net']) }}</dd></div>
+            </dl>
+        </section>
+
         <section class="rounded-xl border bg-white p-5">
             <h2 class="text-xl font-bold">Movimentos de estoque previstos</h2>
             <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">@forelse ($importPlan['movements'] as $movement)<div class="rounded-lg bg-stone-50 p-3 text-sm"><strong>{{ $movement['product_name'] }}</strong><span class="block text-red-700">{{ \App\Support\DecimalFormatter::format($movement['quantity_delta'], 2) }} un</span></div>@empty<p class="text-sm text-stone-500">Nenhum movimento previsto.</p>@endforelse</div>
+            <h3 class="mt-5 font-bold">Saldo projetado após a venda</h3>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">@forelse ($importPlan['stock_after'] as $stock)<div class="rounded-lg border p-3 text-sm"><strong>{{ $stock['product']->name }}</strong><span class="block">Atual {{ \App\Support\DecimalFormatter::format($stock['available'], 2) }} · baixa {{ \App\Support\DecimalFormatter::format($stock['required'], 2) }} · após {{ \App\Support\DecimalFormatter::format($stock['balance_after'], 2) }}</span></div>@empty<p class="text-sm text-stone-500">Saldo não pode ser projetado sem mappings confirmados.</p>@endforelse</div>
         </section>
 
         <form method="POST" action="{{ route('pdv.staging.import', [$connection, $order]) }}" class="rounded-xl border bg-white p-5">
             @csrf
-            <input type="hidden" name="confirmed" value="1">
-            <h2 class="font-bold">Confirmação humana futura</h2>
-            <p class="mt-1 text-sm text-stone-600">O backend revalidará mappings, taxas, saldo, valores, escopo e idempotência dentro da transação.</p>
+            <h2 class="font-bold">Confirmação humana reforçada</h2>
+            <p class="mt-1 text-sm text-stone-600">O backend revalidará mappings, taxas, saldo, valores, escopo e idempotência dentro da transação. O primeiro go-live aceita somente este pedido.</p>
+            <label class="mt-4 flex gap-2 text-sm font-bold"><input type="checkbox" name="confirmed" value="1" class="mt-1 rounded border-stone-300"> Conferi o cabeçalho, todos os itens, pagamentos, taxas e saldos projetados.</label>
+            <label class="mt-3 flex gap-2 text-sm font-bold"><input type="checkbox" name="single_order_confirmed" value="1" class="mt-1 rounded border-stone-300"> Confirmo a importação de um único pedido nesta operação.</label>
+            <label class="mt-4 block text-sm font-bold">Digite IMPORTAR para confirmar<input name="confirmation_text" autocomplete="off" class="mt-1 w-full rounded-lg border-stone-300"></label>
             <button @disabled(! $importPlan['can_execute']) class="mt-4 rounded-lg bg-stone-900 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-stone-300">Confirmar importação atômica</button>
             @if (! $importPlan['import_enabled'])<p class="mt-2 text-xs font-semibold text-red-700">Botão bloqueado pela feature flag PDV_IMPORT_ENABLED=false.</p>@endif
         </form>

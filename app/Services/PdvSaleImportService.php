@@ -20,6 +20,10 @@ class PdvSaleImportService
     /** @return array{status:string,sales:array<int,ProductSale>,missing:array<int,string>} */
     public function import(PdvConnection $connection, ExternalSaleData $data, User $user, ?PdvInboundEvent $inbound = null): array
     {
+        if ($connection->provider === 'grandchef') {
+            throw new IntegrationNotConfiguredException('GrandChef deve passar pelo staging oficial; a importação legada direta é proibida.');
+        }
+
         if (! config('pdv.import_enabled', false)) {
             throw new IntegrationNotConfiguredException('A importação operacional de PDV está desabilitada. Use staging e confirmação humana.');
         }
