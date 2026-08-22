@@ -36,6 +36,10 @@
             @endforeach
         </div>
 
+        @if ($summary['operational_start_pending'] > 0 || $summary['pre_operational'] > 0)
+            <div class="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950"><strong>Visibilidade histórica preservada:</strong> {{ $summary['operational_start_pending'] }} pedido(s) aguardam definição do marco e {{ $summary['pre_operational'] }} estão antes do início oficial. Nenhum deles pode produzir efeitos operacionais.</div>
+        @endif
+
         <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg bg-stone-100 p-3 text-sm"><strong>{{ $summary['product_mapping_pending'] }}</strong> com produto pendente</div>
             <div class="rounded-lg bg-stone-100 p-3 text-sm"><strong>{{ $summary['payment_mapping_pending'] }}</strong> com pagamento pendente</div>
@@ -50,6 +54,7 @@
                     @forelse ($result['orders'] as $preview)
                         @php($order = $preview['order'])
                         @php($reconciliation = $preview['reconciliation'])
+                        @php($classification = $reconciliation['operational_cutoff']['classification'])
                         <tr class="border-t align-top">
                             <td class="p-3"><span class="block font-mono text-xs">{{ $order->external_order_id }}</span><span class="text-stone-500">{{ $order->external_code ?? '—' }}</span></td>
                             <td class="p-3">{{ $order->external_completed_at?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? '—' }}</td>
@@ -58,7 +63,7 @@
                             <td class="p-3 text-right">{{ $order->payments->where('present_in_latest', true)->count() }}</td>
                             <td class="p-3 text-right font-bold">R$ {{ \App\Support\DecimalFormatter::format($order->total) }}</td>
                             <td class="p-3">
-                                <span @class(['rounded-full px-2 py-1 text-xs font-bold', 'bg-emerald-100 text-emerald-800' => $reconciliation['ready_for_import'], 'bg-red-100 text-red-800' => ! $reconciliation['ready_for_import']])>{{ $reconciliation['ready_for_import'] ? 'READY' : 'BLOQUEADO' }}</span>
+                                <span @class(['rounded-full px-2 py-1 text-xs font-bold', 'bg-emerald-100 text-emerald-800' => $reconciliation['ready_for_import'], 'bg-sky-100 text-sky-800' => in_array($classification, ['pre_operational', 'operational_start_pending'], true), 'bg-red-100 text-red-800' => ! $reconciliation['ready_for_import'] && ! in_array($classification, ['pre_operational', 'operational_start_pending'], true)])>{{ match ($classification) { 'pre_operational' => 'HISTÓRICO / PRÉ-OPERAÇÃO', 'operational_start_pending' => 'PRÉ-OPERAÇÃO · MARCO PENDENTE', default => ($reconciliation['ready_for_import'] ? 'READY' : 'BLOQUEADO') } }}</span>
                                 @if (! $reconciliation['ready_for_import'])<p class="mt-2 max-w-sm text-xs text-red-800">{{ collect($reconciliation['blockers'])->pluck('message')->implode(' ') }}</p>@endif
                             </td>
                             <td class="p-3"><a class="font-bold text-amber-700" href="{{ route('pdv.staging.show', [$connection, $order]) }}">Detalhar</a></td>

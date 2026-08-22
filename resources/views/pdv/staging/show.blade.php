@@ -14,6 +14,12 @@
             <p class="mt-2 max-w-3xl text-sm text-stone-600">Plano puro de importação. Abrir ou atualizar esta tela não registra venda, pagamento ou movimentação de estoque.</p>
         </div>
 
+        <section @class(['rounded-xl border p-5', 'border-emerald-200 bg-emerald-50' => $importPlan['importable_by_cutoff'], 'border-sky-200 bg-sky-50' => in_array($importPlan['operational_classification'], ['pre_operational', 'operational_start_pending'], true), 'border-red-200 bg-red-50' => ! $importPlan['importable_by_cutoff'] && ! in_array($importPlan['operational_classification'], ['pre_operational', 'operational_start_pending'], true)])>
+            <h2 class="font-bold">Classificação operacional: {{ match ($importPlan['operational_classification']) { 'operational' => 'OPERACIONAL', 'pre_operational' => 'HISTÓRICO / PRÉ-OPERAÇÃO', 'operational_start_pending' => 'PRÉ-OPERAÇÃO · MARCO PENDENTE', default => 'DATA NÃO ELEGÍVEL' } }}</h2>
+            <p class="mt-1 text-sm">Conclusão: {{ $importPlan['order_completed_at'] ? \Carbon\CarbonImmutable::parse($importPlan['order_completed_at'])->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') : 'não informada' }} · marco: {{ $importPlan['operational_start_at'] ? \Carbon\CarbonImmutable::parse($importPlan['operational_start_at'])->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') : 'não definido' }} · {{ config('app.timezone') }}.</p>
+            <p class="mt-2 text-xs">Pedidos anteriores ao marco permanecem visíveis para auditoria, mas não podem criar venda, pagamento ou baixa de estoque.</p>
+        </section>
+
         <section @class(['rounded-xl border p-5', 'border-red-300 bg-red-50' => ! $importPlan['import_enabled'], 'border-emerald-300 bg-emerald-50' => $importPlan['import_enabled']])>
             <h2 class="font-bold">Importação operacional {{ $importPlan['import_enabled'] ? 'habilitada' : 'desabilitada' }}</h2>
             <p class="mt-1 text-sm">Nenhuma operação será registrada enquanto a importação PDV estiver desabilitada.</p>

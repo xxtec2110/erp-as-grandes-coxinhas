@@ -7,7 +7,7 @@
                 <a href="{{ route('pdv.index') }}" class="text-sm font-bold text-amber-700">← Integrações</a>
                 <p class="mt-3 text-xs font-bold uppercase tracking-widest text-amber-700">{{ $connection->location->name }} · Go-live controlado</p>
                 <h1 class="text-3xl font-bold text-stone-950">Preparar GrandChef para operação</h1>
-                <p class="mt-2 max-w-3xl text-sm text-stone-600">Checklist derivado do staging oficial. Esta tela não consulta o GrandChef, não cria vendas e não altera estoque.</p>
+                <p class="mt-2 max-w-3xl text-sm text-stone-600">Checklist derivado do staging oficial. O GrandChef fornece vendas, nunca estoque. Esta tela não consulta o GrandChef, não cria vendas e não altera saldos.</p>
             </div>
             <form method="GET" class="grid gap-2 rounded-xl border bg-white p-3 sm:grid-cols-[1fr_1fr_auto]">
                 <label class="text-xs font-bold text-stone-600">De<input name="from" type="date" value="{{ $from }}" class="mt-1 w-full rounded-lg border-stone-300 text-sm"></label>
@@ -23,7 +23,36 @@
             </div>
         </section>
 
-        <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+        <section class="rounded-xl border border-sky-200 bg-sky-50 p-5">
+            <div class="grid gap-5 lg:grid-cols-[1fr_1.2fr] lg:items-start">
+                <div>
+                    <p class="text-xs font-bold uppercase tracking-widest text-sky-800">Marco de início oficial</p>
+                    <h2 class="mt-1 text-xl font-bold text-sky-950">{{ $goLive['operational_start_set'] ? 'DEFINIDO' : 'NÃO DEFINIDO' }}</h2>
+                    @if ($goLive['operational_start_set'])
+                        <p class="mt-2 text-sm text-sky-900"><strong>{{ $goLive['operational_start_at']->format('d/m/Y H:i') }}</strong> · {{ config('app.timezone') }}</p>
+                    @else
+                        <p class="mt-2 text-sm text-sky-900">A importação operacional permanece bloqueada até uma decisão humana explícita.</p>
+                    @endif
+                    <p class="mt-3 text-sm text-sky-950">Apenas vendas concluídas a partir deste momento poderão afetar vendas e estoque do ERP.</p>
+                    <p class="mt-2 text-xs text-sky-800">Definir ou ajustar o marco não cria venda, não consulta o GrandChef e não cria movimento de estoque.</p>
+                </div>
+                <form method="POST" action="{{ route('pdv.go-live.operational-start.update', $connection) }}" class="grid gap-3 rounded-xl border border-sky-200 bg-white p-4 sm:grid-cols-2">
+                    @csrf
+                    @method('PUT')
+                    <input type="hidden" name="idempotency_key" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
+                    <label class="text-xs font-bold text-stone-600">Data
+                        <input type="date" name="operational_start_date" value="{{ old('operational_start_date', $goLive['operational_start_at']?->format('Y-m-d')) }}" class="mt-1 w-full rounded-lg border-stone-300 text-sm" required>
+                    </label>
+                    <label class="text-xs font-bold text-stone-600">Hora
+                        <input type="time" name="operational_start_time" value="{{ old('operational_start_time', $goLive['operational_start_at']?->format('H:i')) }}" class="mt-1 w-full rounded-lg border-stone-300 text-sm" required>
+                    </label>
+                    <label class="flex gap-2 text-sm font-semibold sm:col-span-2"><input type="checkbox" name="confirmed" value="1" class="mt-1 rounded border-stone-300" required> Confirmo conscientemente a data e hora do início oficial desta unidade.</label>
+                    <button class="rounded-lg bg-sky-900 px-4 py-2 text-sm font-bold text-white sm:col-span-2">{{ $goLive['operational_start_set'] ? 'Atualizar marco auditável' : 'Definir marco auditável' }}</button>
+                </form>
+            </div>
+        </section>
+
+        <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
             @foreach ($goLive['steps'] as $step)
                 <article @class(['rounded-xl border p-4', 'border-emerald-200 bg-emerald-50' => $step['status'] === 'ready', 'border-amber-200 bg-amber-50' => $step['status'] === 'pending', 'border-red-200 bg-red-50' => $step['status'] === 'blocked'])>
                     <p class="text-xs font-bold uppercase text-stone-500">Etapa {{ $step['number'] }}</p>
@@ -85,14 +114,18 @@
 
         <section class="grid gap-5 xl:grid-cols-2">
             <article class="rounded-xl border bg-white p-5">
-                <p class="text-xs font-bold uppercase text-amber-700">Etapa 5</p><h2 class="text-xl font-bold">Estoque físico por mapping confirmado</h2>
-                <p class="mt-1 text-sm text-stone-600">Quantidades vendidas no staging nunca são tratadas como estoque inicial.</p>
-                <div class="mt-4 space-y-2">@forelse ($goLive['catalog']['stock_preview'] as $row)<div class="rounded-lg border p-3 text-sm"><strong>{{ $row['product']->name }}</strong><span class="block">Necessário {{ \App\Support\DecimalFormatter::format($row['required'], 2) }} · disponível {{ \App\Support\DecimalFormatter::format($row['available'], 2) }} · déficit {{ \App\Support\DecimalFormatter::format($row['deficit'], 2) }}</span></div>@empty<p class="rounded-lg bg-stone-100 p-3 text-sm">Nenhum saldo é atribuído enquanto não houver mapping confirmado.</p>@endforelse</div>
+                <p class="text-xs font-bold uppercase text-amber-700">Etapa 6</p><h2 class="text-xl font-bold">Estoque inicial oficial</h2>
+                <p class="mt-1 text-sm text-stone-600">O estoque do GrandChef não será importado. Informe a quantidade física existente nesta unidade pelo fluxo oficial.</p>
+                @if (! $goLive['operational_start_set'])
+                    <p class="mt-3 rounded-lg bg-sky-50 p-3 text-xs font-semibold text-sky-900">Os dados staged permanecem como validação/pré-operação. Enquanto o marco estiver pendente, não geram necessidade operacional de estoque.</p>
+                @endif
+                <div class="mt-4 max-h-[34rem] space-y-2 overflow-y-auto">@forelse ($goLive['stock_inventory'] as $row)<div class="rounded-lg border p-3 text-sm"><div class="flex flex-wrap justify-between gap-2"><strong>{{ $row['product']->name }}</strong><span class="text-xs font-bold {{ $row['opening_stock_recorded'] ? 'text-emerald-700' : 'text-amber-700' }}">{{ $row['opening_stock_recorded'] ? 'Estoque inicial informado' : 'Estoque inicial pendente' }}</span></div><span class="mt-1 block">Saldo oficial {{ \App\Support\DecimalFormatter::format($row['balance'], 2) }} · necessidade operacional {{ \App\Support\DecimalFormatter::format($row['operational_required'], 2) }}</span><span class="block text-xs text-stone-500">Histórico/pré-operação {{ \App\Support\DecimalFormatter::format($row['historical_quantity'], 2) }} · última movimentação {{ $row['last_movement']?->operation_date?->format('d/m/Y') ?? 'nenhuma' }}</span></div>@empty<p class="rounded-lg bg-stone-100 p-3 text-sm">Nenhum Product mapeado para conferir.</p>@endforelse</div>
                 <a href="{{ route('stock.opening.create', ['location_id' => $connection->location_id]) }}" class="mt-4 inline-flex rounded-lg border px-3 py-2 text-sm font-bold">Fluxo oficial de estoque inicial</a>
             </article>
 
             <article class="rounded-xl border bg-white p-5">
-                <p class="text-xs font-bold uppercase text-amber-700">Etapa 6</p><h2 class="text-xl font-bold">Dry-run oficial de {{ $goLive['dry_run_summary']['orders'] }} pedidos</h2>
+                <p class="text-xs font-bold uppercase text-amber-700">Etapa 7</p><h2 class="text-xl font-bold">Dry-run oficial de {{ $goLive['dry_run_summary']['orders'] }} pedidos</h2>
+                <p class="mt-2 rounded-lg bg-stone-100 p-3 text-xs text-stone-700">Operacionais: {{ $goLive['dry_run_summary']['operational'] }} · históricos/pré-operação: {{ $goLive['dry_run_summary']['pre_operational'] + $goLive['dry_run_summary']['operational_start_pending'] }}. Histórico permanece consultável, mas não importável.</p>
                 <dl class="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3"><div><dt class="text-stone-500">READY</dt><dd class="text-2xl font-bold">{{ $goLive['dry_run_summary']['ready'] }}</dd></div><div><dt class="text-stone-500">Bloqueados</dt><dd class="text-2xl font-bold">{{ $goLive['dry_run_summary']['blocked'] }}</dd></div><div><dt class="text-stone-500">ProductSales</dt><dd class="text-2xl font-bold">{{ $goLive['dry_run_summary']['planned_items'] }}</dd></div><div><dt class="text-stone-500">Pagamentos</dt><dd class="text-2xl font-bold">{{ $goLive['dry_run_summary']['planned_payments'] }}</dd></div><div><dt class="text-stone-500">Movimentos</dt><dd class="text-2xl font-bold">{{ $goLive['dry_run_summary']['planned_movements'] }}</dd></div></dl>
                 <div class="mt-4 flex flex-wrap gap-2">@foreach ($goLive['dry_run_summary']['blocker_codes'] as $code => $count)<span class="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-800">{{ $code }}: {{ $count }}</span>@endforeach</div>
                 <details class="mt-4"><summary class="cursor-pointer text-sm font-bold">Ver os {{ $goLive['dry_runs']->count() }} resultados individuais</summary><div class="mt-3 max-h-80 space-y-2 overflow-y-auto">@foreach ($goLive['dry_runs'] as $run)<a href="{{ route('pdv.staging.show', [$connection, $run['order']]) }}" class="flex flex-wrap justify-between gap-2 rounded-lg border bg-stone-50 p-3 text-sm"><span class="font-bold">{{ $run['order']->external_code ?? $run['order']->external_order_id }} · R$ {{ \App\Support\DecimalFormatter::format($run['total']) }}</span><span>{{ $run['ready'] ? 'Pronto para importar' : 'Bloqueado' }} · {{ count($run['blockers']) }} motivo(s) · itens {{ $run['external_items'] }}/{{ $run['items'] }} previstos · pagamentos {{ $run['external_payments'] }}/{{ $run['payments'] }} previstos</span></a>@endforeach</div></details>

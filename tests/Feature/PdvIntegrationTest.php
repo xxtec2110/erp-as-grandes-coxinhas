@@ -49,7 +49,7 @@ class PdvIntegrationTest extends TestCase
         $this->location = Location::query()->create(['name' => 'Loja', 'type' => 'store', 'active' => true]);
         $this->product = Product::query()->create(['name' => 'Frango', 'stock_unit' => 'un', 'active' => true]);
         $this->connection = PdvConnection::query()->firstOrFail();
-        $this->connection->update(['location_id' => $this->location->id, 'provider' => 'fake']);
+        $this->connection->update(['location_id' => $this->location->id, 'provider' => 'fake', 'operational_start_at' => '2026-08-14 00:00:00-03:00']);
         PdvLocationMapping::query()->create(['pdv_connection_id' => $this->connection->id, 'external_location_id' => 'L1', 'external_name' => 'Loja 1', 'location_id' => $this->location->id, 'status' => 'confirmed']);
         PdvProductMapping::query()->create(['pdv_connection_id' => $this->connection->id, 'external_product_id' => 'P1', 'external_name' => 'Frango', 'product_id' => $this->product->id, 'status' => 'confirmed', 'match_source' => 'admin']);
         app(StockMovementService::class)->record(new RecordStockMovementData($this->product->id, $this->location->id, StockMovementType::OpeningBalance, '100', '2026-08-14', 'pdv-opening'));

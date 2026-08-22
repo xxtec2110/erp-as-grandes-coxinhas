@@ -23,10 +23,11 @@ class PdvSyncService
         $this->access->authorizeConnection($user, $connection);
         $checkpoint = PdvSyncCheckpoint::query()->firstOrCreate(['pdv_connection_id' => $connection->id, 'location_id' => $location->id, 'stream' => 'sales']);
         $checkpoint->update(['last_attempt_at' => now()]);
+        [$providerCursor, $effectiveFrom, $effectiveTo, $operationalWindow] = $this->window($connection, $checkpoint, $from, $to);
         $started = hrtime(true);
         $this->events->record('sync_started', $connection, user: $user, status: 'running');
         try {
-            $page = $this->providers->for($connection)->fetchSales($connection, $checkpoint->cursor, $from, $to);
+            $page = $this->providers->for($connection)->fetchSales($connection, $providerCursor, $effectiveFrom, $effectiveTo);
             $result = ['staged' => 0, 'imported' => 0, 'waiting_mapping' => 0];
             foreach ($page->items as $sale) {
                 $eventId = $this->inbound->syntheticEventId($connection->provider, $sale->externalSaleId, 'sale.updated', $sale->updatedAt->toIso8601String());
@@ -40,7 +41,20 @@ class PdvSyncService
                     $result[$outcome['status']] = ($result[$outcome['status']] ?? 0) + 1;
                 }
             }
-            $checkpoint->update(['cursor' => $page->nextCursor, 'last_success_at' => now(), 'last_error' => null]);
+            if ($connection->provider !== 'grandchef' || $operationalWindow) {
+                $checkpoint->update([
+                    'cursor' => $operationalWindow && $page->nextCursor !== null ? [
+                        'operational_window_version' => 1,
+                        'provider_cursor' => $page->nextCursor,
+                        'from' => $effectiveFrom?->toIso8601String(),
+                        'to' => $effectiveTo?->toIso8601String(),
+                    ] : $page->nextCursor,
+                    'last_success_at' => $page->nextCursor === null ? ($effectiveTo ?? now()) : $checkpoint->last_success_at,
+                    'last_error' => null,
+                ]);
+            } else {
+                $checkpoint->update(['last_error' => null]);
+            }
             $connection->update(['last_success_at' => now(), 'status' => 'healthy']);
             $this->events->record('sync_completed', $connection, user: $user, status: 'success', metadata: $result, durationMs: (int) ((hrtime(true) - $started) / 1_000_000));
 
@@ -52,5 +66,50 @@ class PdvSyncService
             $this->events->record('sync_failed', $connection, user: $user, status: 'failed', metadata: ['error' => class_basename($e)], durationMs: (int) ((hrtime(true) - $started) / 1_000_000));
             throw $e;
         }
+    }
+
+    /** @return array{0:?array,1:?CarbonImmutable,2:?CarbonImmutable,3:bool} */
+    private function window(PdvConnection $connection, PdvSyncCheckpoint $checkpoint, ?CarbonImmutable $from, ?CarbonImmutable $to): array
+    {
+        if (($from === null) !== ($to === null)) {
+            throw new IntegrationNotConfiguredException('A sincronização exige início e fim juntos.');
+        }
+
+        if ($connection->provider !== 'grandchef') {
+            return [$checkpoint->cursor, $from, $to, false];
+        }
+
+        if ($from !== null && $to !== null) {
+            return [null, $from, $to, false];
+        }
+
+        if ($connection->operational_start_at === null) {
+            throw new IntegrationNotConfiguredException('Defina o marco oficial de início antes da sincronização operacional do GrandChef.');
+        }
+
+        $timezone = config('app.timezone', 'America/Sao_Paulo');
+        $operationalStart = CarbonImmutable::instance($connection->operational_start_at)->setTimezone($timezone);
+        $cursor = $checkpoint->cursor;
+        if (($cursor['operational_window_version'] ?? null) === 1) {
+            $windowFrom = CarbonImmutable::parse((string) $cursor['from'], $timezone);
+            if ($windowFrom->greaterThanOrEqualTo($operationalStart)) {
+                return [
+                    $cursor['provider_cursor'] ?? null,
+                    $windowFrom,
+                    CarbonImmutable::parse((string) $cursor['to'], $timezone),
+                    true,
+                ];
+            }
+        }
+
+        $lastSuccess = $checkpoint->last_success_at === null
+            ? null
+            : CarbonImmutable::instance($checkpoint->last_success_at)->setTimezone($timezone);
+        $hasOperationalCheckpoint = $lastSuccess !== null && $lastSuccess->greaterThanOrEqualTo($operationalStart);
+        $effectiveFrom = $hasOperationalCheckpoint && $lastSuccess->greaterThan($operationalStart)
+            ? $lastSuccess
+            : $operationalStart;
+
+        return [$hasOperationalCheckpoint ? $cursor : null, $effectiveFrom, CarbonImmutable::now($timezone), true];
     }
 }

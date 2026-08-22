@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\StockMovementType;
 use App\Models\PdvConnection;
 use App\Models\PdvOrder;
+use App\Models\StockMovement;
 use Brick\Math\BigDecimal;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -21,6 +23,13 @@ class PdvOperationalReadinessService
         $paymentsSupported = $summary['payments_distinct'] - $summary['payments_unsupported'];
         $paymentsPending = $summary['payments_distinct'] - $summary['payments_mapped'];
         $stockDeficits = collect($catalog['stock_preview'])->filter(fn (array $row): bool => BigDecimal::of($row['deficit'])->isPositive());
+        $mappedProductIds = collect($catalog['products'])->where('mapping_status', 'confirmed')->pluck('mapping.product_id')->filter()->unique();
+        $openingStockPending = $mappedProductIds->filter(fn (int $productId): bool => ! StockMovement::query()
+            ->where('product_id', $productId)
+            ->where('location_id', $connection->location_id)
+            ->where('type', StockMovementType::OpeningBalance->value)
+            ->exists())->count();
+        $operationalStartSet = $connection->operational_start_at !== null;
         $simulation = $this->simulateExactMappings($connection, $from, $to, $catalog['products']);
         $importEnabled = (bool) config('pdv.import_enabled', false);
         $allReady = $readinessSummary['ready'] === $readinessSummary['staged'] && $readinessSummary['staged'] > 0;
@@ -29,8 +38,9 @@ class PdvOperationalReadinessService
             'steps' => [
                 ['number' => 1, 'label' => 'Produtos', 'status' => $productsPending === 0 && $summary['products_without_candidate'] === 0 ? 'ready' : 'attention', 'detail' => "{$summary['products_mapped']} mapeados · {$summary['products_without_candidate']} Products faltantes · {$productsPending} mappings pendentes"],
                 ['number' => 2, 'label' => 'Pagamentos', 'status' => $paymentsPending === 0 && $summary['payments_configuration_missing'] === 0 ? 'ready' : 'attention', 'detail' => "{$paymentsSupported} suportados · {$paymentsPending} mappings pendentes · {$summary['payments_configuration_missing']} sem configuração financeira"],
-                ['number' => 3, 'label' => 'Estoque', 'status' => $stockDeficits->isEmpty() && $summary['products_mapped'] > 0 ? 'ready' : 'attention', 'detail' => $summary['products_mapped'] === 0 ? 'Depende da confirmação humana dos mappings' : $stockDeficits->count().' Products com déficit'],
-                ['number' => 4, 'label' => 'Importação', 'status' => $allReady && $importEnabled ? 'ready' : 'blocked', 'detail' => ! $importEnabled ? 'Infraestrutura disponível, mas a feature flag operacional permanece OFF.' : ($allReady ? 'Pedidos liberados para confirmação humana.' : 'Aguardando a resolução dos blockers anteriores.')],
+                ['number' => 3, 'label' => 'Marco oficial', 'status' => $operationalStartSet ? 'ready' : 'attention', 'detail' => $operationalStartSet ? $connection->operational_start_at->setTimezone(config('app.timezone'))->format('d/m/Y H:i') : 'Data e hora ainda não definidas'],
+                ['number' => 4, 'label' => 'Estoque inicial', 'status' => $openingStockPending === 0 && $mappedProductIds->isNotEmpty() ? 'ready' : 'attention', 'detail' => $openingStockPending.' Products aguardam contagem física'],
+                ['number' => 5, 'label' => 'Importação', 'status' => $allReady && $importEnabled && $operationalStartSet && $openingStockPending === 0 ? 'ready' : 'blocked', 'detail' => ! $importEnabled ? 'Infraestrutura disponível, mas a feature flag operacional permanece OFF.' : ($allReady && $operationalStartSet && $openingStockPending === 0 ? 'Pedidos liberados para confirmação humana.' : 'Aguardando a resolução dos blockers anteriores.')],
             ],
             'summary' => [
                 'products_existing' => $summary['products_distinct'] - $summary['products_without_candidate'],
@@ -42,6 +52,8 @@ class PdvOperationalReadinessService
                 'payments_configuration_missing' => $summary['payments_configuration_missing'],
                 'stock_identifiable' => collect($catalog['stock_preview'])->count(),
                 'stock_deficits' => $stockDeficits->count(),
+                'operational_start_set' => $operationalStartSet,
+                'opening_stock_pending' => $openingStockPending,
                 'staged' => $readinessSummary['staged'],
                 'ready' => $readinessSummary['ready'],
                 'blocked' => $readinessSummary['blocked'],

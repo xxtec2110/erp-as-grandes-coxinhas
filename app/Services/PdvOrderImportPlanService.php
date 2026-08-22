@@ -19,6 +19,7 @@ class PdvOrderImportPlanService
     {
         $order->loadMissing(['connection', 'location', 'items', 'payments']);
         $reconciliation = $this->reconciliation->reconcile($order);
+        $operationalCutoff = $reconciliation['operational_cutoff'];
         $blockers = $reconciliation['blockers'];
         $warnings = $reconciliation['warnings'];
 
@@ -26,9 +27,15 @@ class PdvOrderImportPlanService
             $this->block($blockers, 'operation_date_missing', 'O pedido não possui data de conclusão para a operação oficial.');
         }
 
-        $itemPlan = $this->items($order, $reconciliation, $blockers, $warnings);
-        $paymentPlan = $this->payments($order, $reconciliation, $itemPlan['items'], $blockers);
-        $items = $this->attachItemFinancials($itemPlan['items'], $paymentPlan['payments']);
+        $itemPlan = $operationalCutoff['importable_by_cutoff']
+            ? $this->items($order, $reconciliation, $blockers, $warnings)
+            : ['items' => [], 'product_revenue' => BigDecimal::zero()->toScale(2), 'discount_allocated' => BigDecimal::zero()->toScale(2)];
+        $paymentPlan = $operationalCutoff['importable_by_cutoff']
+            ? $this->payments($order, $reconciliation, $itemPlan['items'], $blockers)
+            : ['payments' => [], 'amount' => BigDecimal::zero()->toScale(2), 'fee' => BigDecimal::zero()->toScale(2), 'net' => BigDecimal::zero()->toScale(2)];
+        $items = $operationalCutoff['importable_by_cutoff']
+            ? $this->attachItemFinancials($itemPlan['items'], $paymentPlan['payments'])
+            : [];
         $ready = $blockers === [];
         $enabled = (bool) config('pdv.import_enabled', false);
         $stockAfter = collect($reconciliation['stock_status']['products'] ?? [])->map(fn (array $row): array => [
@@ -41,6 +48,11 @@ class PdvOrderImportPlanService
 
         return [
             'order' => $order,
+            'operational_start_at' => $operationalCutoff['operational_start_at'],
+            'order_completed_at' => $operationalCutoff['order_completed_at'],
+            'is_after_operational_start' => $operationalCutoff['is_after_operational_start'],
+            'importable_by_cutoff' => $operationalCutoff['importable_by_cutoff'],
+            'operational_classification' => $operationalCutoff['classification'],
             'reconciliation' => $reconciliation,
             'items' => $items,
             'payments' => $paymentPlan['payments'],

@@ -81,6 +81,24 @@ class PdvMappingCatalogService
             ->orderByDesc('orders.external_completed_at')->orderByDesc('items.id')
             ->get(['items.external_product_id', 'items.unit_price'])
             ->groupBy('external_product_id');
+        $operationalQuantities = collect();
+        if ($connection->operational_start_at !== null) {
+            $operationalFrom = CarbonImmutable::instance($connection->operational_start_at)->utc();
+            if ($operationalFrom->lessThanOrEqualTo($toUtc)) {
+                $eligibleFrom = $operationalFrom->greaterThan($fromUtc) ? $operationalFrom : $fromUtc;
+                $operationalQuantities = DB::table('pdv_order_items as items')
+                    ->join('pdv_orders as orders', 'orders.id', '=', 'items.pdv_order_id')
+                    ->where('orders.pdv_connection_id', $connection->id)
+                    ->whereBetween('orders.external_completed_at', [$eligibleFrom, $toUtc])
+                    ->where('items.present_in_latest', true)
+                    ->where('items.cancelled', false)
+                    ->whereNotNull('items.external_product_id')
+                    ->groupBy('items.external_product_id')
+                    ->selectRaw('items.external_product_id, SUM(items.quantity) AS quantity_total')
+                    ->get()
+                    ->keyBy('external_product_id');
+            }
+        }
 
         return DB::table('pdv_order_items as items')
             ->join('pdv_orders as orders', 'orders.id', '=', 'items.pdv_order_id')
@@ -93,7 +111,7 @@ class PdvMappingCatalogService
             ->orderByRaw('MAX(items.description)')
             ->selectRaw('items.external_product_id, MAX(items.external_product_code) AS external_product_code, MAX(items.description) AS description, COUNT(*) AS line_count, SUM(items.quantity) AS quantity_total, SUM(items.total) AS value_total, COUNT(DISTINCT items.pdv_order_id) AS order_count, MIN(orders.external_completed_at) AS first_appearance, MAX(orders.external_completed_at) AS last_appearance')
             ->get()
-            ->map(function (object $row) use ($connection, $erpProducts, $categories, $mappings, $priceObservations, &$stock): array {
+            ->map(function (object $row) use ($connection, $erpProducts, $categories, $mappings, $priceObservations, $operationalQuantities, &$stock): array {
                 $mapping = $mappings->get($row->external_product_id);
                 $suggestion = $this->suggestions->suggest((string) $row->description, $erpProducts);
                 $mappingStatus = $mapping?->status === 'confirmed' && $mapping->product_id !== null ? 'confirmed' : ($mapping?->status ?? 'unmapped');
@@ -101,9 +119,11 @@ class PdvMappingCatalogService
                 // Sugestões exatas/alias continuam sendo apenas auxiliares de decisão.
                 $stockProduct = $mappingStatus === 'confirmed' ? $mapping?->product : null;
                 $stockPreview = null;
-                if ($stockProduct !== null) {
+                $operationalQuantity = BigDecimal::of((string) ($operationalQuantities->get($row->external_product_id)?->quantity_total ?? '0'))->toScale(6, RoundingMode::HalfUp);
+                $historicalQuantity = BigDecimal::of((string) $row->quantity_total)->minus($operationalQuantity)->toScale(6, RoundingMode::HalfUp);
+                if ($stockProduct !== null && $operationalQuantity->isPositive()) {
                     $available = $stock[$stockProduct->id] ??= $this->balances->balance($stockProduct->id, (int) $connection->location_id);
-                    $required = BigDecimal::of((string) $row->quantity_total)->toScale(6, RoundingMode::HalfUp);
+                    $required = $operationalQuantity;
                     $deficit = BigDecimal::of($available)->minus($required);
                     $deficit = $deficit->isNegative() ? $deficit->abs() : BigDecimal::zero();
                     $stockPreview = [
@@ -122,6 +142,8 @@ class PdvMappingCatalogService
                     'description' => (string) $row->description,
                     'line_count' => (int) $row->line_count,
                     'quantity_total' => (string) $row->quantity_total,
+                    'operational_quantity_total' => (string) $operationalQuantity,
+                    'historical_quantity_total' => (string) $historicalQuantity,
                     'value_total' => (string) $row->value_total,
                     'order_count' => (int) $row->order_count,
                     'first_appearance' => CarbonImmutable::parse((string) $row->first_appearance),

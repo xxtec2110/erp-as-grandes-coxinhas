@@ -66,7 +66,7 @@ class PdvOfficialOrderImportTest extends TestCase
         $this->location = Location::query()->create(['name' => 'Unidade teste', 'type' => Location::TYPE_STORE, 'active' => true]);
         $this->otherLocation = Location::query()->create(['name' => 'Outra unidade', 'type' => Location::TYPE_STORE, 'active' => true]);
         $this->connection = PdvConnection::query()->firstOrFail();
-        $this->connection->update(['location_id' => $this->location->id, 'name' => 'GrandChef teste', 'enabled' => true]);
+        $this->connection->update(['location_id' => $this->location->id, 'name' => 'GrandChef teste', 'enabled' => true, 'operational_start_at' => '2026-08-20 00:00:00-03:00']);
         $this->products = [
             'P1' => Product::query()->create(['name' => 'Produto 1', 'stock_unit' => 'un', 'active' => true]),
             'P2' => Product::query()->create(['name' => 'Produto 2', 'stock_unit' => 'un', 'active' => true]),

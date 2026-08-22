@@ -25,6 +25,7 @@ class PdvOrderImportService
         private ProductSaleService $sales,
         private PdvConnectionAccessService $access,
         private PdvIntegrationEventService $events,
+        private PdvOperationalCutoffService $cutoffs,
     ) {}
 
     /** @return array{status:string,order:ProductSaleOrder} */
@@ -44,14 +45,20 @@ class PdvOrderImportService
         try {
             return DB::transaction(function () use ($order, $user, $connection, $location): array {
                 Location::query()->whereKey($location->id)->lockForUpdate()->firstOrFail();
+                $lockedConnection = $connection->newQuery()->whereKey($connection->id)->lockForUpdate()->firstOrFail();
                 $locked = PdvOrder::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
-                if ($locked->pdv_connection_id !== $connection->id || $locked->location_id !== $location->id) {
+                if ($locked->pdv_connection_id !== $lockedConnection->id || $locked->location_id !== $location->id) {
                     throw new DomainException('O escopo do pedido mudou durante a importação.');
                 }
 
                 $existing = ProductSaleOrder::query()->where('pdv_order_id', $locked->id)->first();
                 if ($existing !== null) {
                     return ['status' => $existing->status === ProductSaleOrder::STATUS_REVERSED ? 'already_reversed' : 'already_imported', 'order' => $existing->load(['sales', 'payments.allocations'])];
+                }
+
+                $cutoff = $this->cutoffs->assess($lockedConnection, $locked->external_completed_at);
+                if (! $cutoff['importable_by_cutoff']) {
+                    throw new PdvOrderImportBlockedException([$cutoff['blocker']]);
                 }
 
                 $plan = $this->plans->plan($locked);
@@ -152,7 +159,7 @@ class PdvOrderImportService
                     ->whereIn('reference_id', $official->sales->pluck('id')->map(fn (int $id): string => (string) $id))
                     ->pluck('id')->all();
                 $locked->update(['processing_state' => PdvOrder::STATE_IMPORTED, 'imported_at' => now()]);
-                $this->events->record('order_imported', $connection, user: $user, status: 'imported', metadata: [
+                $this->events->record('order_imported', $lockedConnection, user: $user, status: 'imported', metadata: [
                     'pdv_order_id' => $locked->id,
                     'external_order_id' => $locked->external_order_id,
                     'location_id' => $location->id,

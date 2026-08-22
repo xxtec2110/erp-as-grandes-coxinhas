@@ -43,6 +43,8 @@ class PdvOrderPreviewService
                 'staged' => count($previews),
                 'ready' => collect($previews)->where('reconciliation.ready_for_import', true)->count(),
                 'blocked' => collect($previews)->where('reconciliation.ready_for_import', false)->count(),
+                'operational_start_pending' => $this->ordersWith($previews, ['operational_start_not_set']),
+                'pre_operational' => $this->ordersWith($previews, ['before_operational_start']),
                 'product_mapping_pending' => $this->ordersWith($previews, ['product_mapping_missing', 'product_mapping_not_confirmed', 'mapped_product_inactive']),
                 'payment_mapping_pending' => $this->ordersWith($previews, ['payment_missing', 'payment_mapping_missing', 'payment_mapping_not_confirmed', 'payment_mapping_incomplete']),
                 'payment_unsupported' => $this->ordersWith($previews, ['payment_mapping_unsupported', 'payment_method_not_operational']),

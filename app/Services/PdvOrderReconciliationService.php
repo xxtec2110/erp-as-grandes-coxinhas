@@ -32,6 +32,7 @@ class PdvOrderReconciliationService
         private StockBalanceService $balances,
         private PdvPaymentCompatibilityService $paymentCompatibility,
         private PaymentFeeResolver $fees,
+        private PdvOperationalCutoffService $cutoffs,
     ) {}
 
     /** @return array<string, mixed> */
@@ -45,6 +46,20 @@ class PdvOrderReconciliationService
 
         if ($order->connection === null || $order->location === null || $order->connection->location_id !== $order->location_id) {
             $this->block($blockers, 'location_scope_mismatch', 'O pedido não pertence à unidade da conexão.');
+        }
+
+        $operationalCutoff = $order->connection === null
+            ? [
+                'operational_start_at' => null,
+                'order_completed_at' => $order->external_completed_at?->toIso8601String(),
+                'is_after_operational_start' => null,
+                'importable_by_cutoff' => false,
+                'classification' => 'invalid_connection_scope',
+                'blocker' => null,
+            ]
+            : $this->cutoffs->assess($order->connection, $order->external_completed_at);
+        if ($operationalCutoff['blocker'] !== null) {
+            $this->block($blockers, $operationalCutoff['blocker']['code'], $operationalCutoff['blocker']['message']);
         }
 
         $cancelled = $this->cancelled($order->external_status);
@@ -65,13 +80,16 @@ class PdvOrderReconciliationService
 
         $productStatus = $this->products($order, $items->all(), $cancelled, $blockers);
         $paymentStatus = $this->payments($order, $payments->all(), $cancelled, $blockers);
-        $stockStatus = $this->stock($order, $productStatus['items'], $cancelled, $blockers);
+        $stockStatus = $operationalCutoff['importable_by_cutoff']
+            ? $this->stock($order, $productStatus['items'], $cancelled, $blockers)
+            : ['ready' => true, 'products' => [], 'skipped_by_operational_cutoff' => true];
         $totalsStatus = $this->totals($order, $items->all(), $payments->all(), $warnings, $blockers);
 
         return [
             'ready_for_import' => $blockers === [],
             'blockers' => $blockers,
             'warnings' => $warnings,
+            'operational_cutoff' => $operationalCutoff,
             'product_mapping_status' => $productStatus,
             'payment_mapping_status' => $paymentStatus,
             'stock_status' => $stockStatus,

@@ -60,8 +60,8 @@ class PdvMappingReadinessTest extends TestCase
         $this->ibira = Location::query()->create(['name' => 'Unidade Ibirá', 'type' => 'store', 'active' => true]);
         $this->catanduva = Location::query()->create(['name' => 'Unidade Catanduva', 'type' => 'store', 'active' => true]);
         $this->ibiraConnection = PdvConnection::query()->firstOrFail();
-        $this->ibiraConnection->update(['location_id' => $this->ibira->id, 'name' => 'GrandChef Ibirá', 'enabled' => true, 'status' => 'healthy']);
-        $this->catanduvaConnection = PdvConnection::query()->create(['location_id' => $this->catanduva->id, 'provider' => 'grandchef', 'name' => 'GrandChef Catanduva', 'enabled' => false, 'status' => 'not_configured']);
+        $this->ibiraConnection->update(['location_id' => $this->ibira->id, 'name' => 'GrandChef Ibirá', 'enabled' => true, 'status' => 'healthy', 'operational_start_at' => '2026-08-20 00:00:00-03:00']);
+        $this->catanduvaConnection = PdvConnection::query()->create(['location_id' => $this->catanduva->id, 'provider' => 'grandchef', 'name' => 'GrandChef Catanduva', 'enabled' => false, 'status' => 'not_configured', 'operational_start_at' => '2026-08-20 00:00:00-03:00']);
         $this->coxinhas = ProductCategory::query()->create(['name' => 'Coxinhas', 'active' => true]);
     }
 

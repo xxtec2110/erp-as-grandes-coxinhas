@@ -16,6 +16,7 @@ class PdvConnection extends Model
     {
         return [
             'enabled' => 'boolean',
+            'operational_start_at' => 'immutable_datetime',
             'configuration' => 'array',
             'encrypted_credentials' => 'encrypted:array',
             'last_attempt_at' => 'datetime',

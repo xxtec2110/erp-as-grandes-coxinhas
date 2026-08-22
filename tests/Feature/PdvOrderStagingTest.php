@@ -61,6 +61,7 @@ class PdvOrderStagingTest extends TestCase
             'location_id' => $this->ibira->id,
             'name' => 'GrandChef Ibirá',
             'enabled' => true,
+            'operational_start_at' => '2026-08-20 00:00:00-03:00',
             'configuration' => ['endpoint' => 'https://ibira.invalid/graphql'],
             'encrypted_credentials' => ['bearer_token' => 'fixture-bearer', 'device_token' => 'fixture-device'],
         ]);
@@ -70,6 +71,7 @@ class PdvOrderStagingTest extends TestCase
             'name' => 'GrandChef Catanduva',
             'status' => 'not_configured',
             'enabled' => false,
+            'operational_start_at' => '2026-08-20 00:00:00-03:00',
         ]);
         $this->product = Product::query()->create(['name' => 'Coxinha oficial', 'stock_unit' => 'un', 'active' => true]);
     }

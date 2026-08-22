@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PdvOperationalStartRequest;
 use App\Http\Requests\PdvOrderPeriodRequest;
 use App\Http\Requests\PdvProductBatchConfirmRequest;
 use App\Http\Requests\PdvProductBatchOnboardingRequest;
@@ -9,8 +10,10 @@ use App\Models\PdvConnection;
 use App\Services\AuthorizationService;
 use App\Services\PdvConnectionAccessService;
 use App\Services\PdvGoLiveService;
+use App\Services\PdvOperationalStartService;
 use App\Services\PdvProductBatchOnboardingService;
 use Carbon\CarbonImmutable;
+use DomainException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -51,6 +54,25 @@ class PdvGoLiveController extends Controller
 
         return redirect()->route('pdv.go-live', $connection)
             ->with('success', $result['created'].' Product(s) oficial(is) criado(s). Nenhum mapping, venda ou estoque foi alterado.');
+    }
+
+    public function updateOperationalStart(PdvOperationalStartRequest $request, PdvConnection $connection, PdvConnectionAccessService $access, PdvOperationalStartService $operationalStart): RedirectResponse
+    {
+        $access->authorizeConnection($request->user(), $connection);
+        $access->assertOperationalScope($connection);
+        $timezone = config('app.timezone', 'America/Sao_Paulo');
+        $value = CarbonImmutable::parse(
+            $request->validated('operational_start_date').' '.$request->validated('operational_start_time'),
+            $timezone,
+        );
+
+        try {
+            $operationalStart->set($connection, $value, $request->user(), (string) $request->validated('idempotency_key'));
+        } catch (DomainException $exception) {
+            return back()->withInput()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', 'Marco oficial de início atualizado e auditado. Nenhuma venda ou movimentação de estoque foi criada.');
     }
 
     /** @param array<string,mixed> $validated
