@@ -30,7 +30,7 @@ class PdvPaymentCompatibilityService
     {
         $card = $method->requiresCardConfiguration();
 
-        return ['supported' => true, 'method' => $method->value, 'label' => $method->label(), 'requires_acquirer' => $card, 'requires_brand' => $card, 'requires_rate' => $card, 'reason' => null];
+        return ['supported' => true, 'method' => $method->value, 'label' => $method->label(), 'requires_acquirer' => $card, 'requires_brand' => false, 'requires_rate' => $card, 'reason' => null];
     }
 
     /** @return array{supported:bool,method:null,label:string,requires_acquirer:bool,requires_brand:bool,requires_rate:bool,reason:string} */

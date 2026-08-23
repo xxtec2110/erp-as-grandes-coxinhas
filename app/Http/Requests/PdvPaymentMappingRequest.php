@@ -16,8 +16,8 @@ class PdvPaymentMappingRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $configuration = (string) $this->input('financial_configuration');
-        if (preg_match('/^(\d+):(\d+)$/', $configuration, $matches) === 1) {
-            $this->merge(['acquirer_id' => $matches[1], 'card_brand_id' => $matches[2]]);
+        if (preg_match('/^(\d+):(\d+|none)$/', $configuration, $matches) === 1) {
+            $this->merge(['acquirer_id' => $matches[1], 'card_brand_id' => $matches[2] === 'none' ? null : $matches[2]]);
         }
     }
 
@@ -29,7 +29,7 @@ class PdvPaymentMappingRequest extends FormRequest
             'payment_method' => ['required', Rule::in(ProductSalePaymentMethod::values())],
             'financial_configuration' => ['nullable', 'string', 'max:100'],
             'acquirer_id' => ['nullable', Rule::requiredIf($requiresCard), Rule::prohibitedIf(fn (): bool => ! $requiresCard()), 'integer', Rule::exists('acquirers', 'id')->where('active', true)],
-            'card_brand_id' => ['nullable', Rule::requiredIf($requiresCard), Rule::prohibitedIf(fn (): bool => ! $requiresCard()), 'integer', Rule::exists('card_brands', 'id')->where('active', true)],
+            'card_brand_id' => ['nullable', Rule::prohibitedIf(fn (): bool => ! $requiresCard()), 'integer', Rule::exists('card_brands', 'id')->where('active', true)],
             'confirm_remap' => ['sometimes', 'accepted'],
             'reason' => ['nullable', 'string', 'max:1000'],
             'idempotency_key' => ['required', 'uuid'],

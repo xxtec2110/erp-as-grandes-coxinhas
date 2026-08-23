@@ -30,6 +30,7 @@
                     </div>
 
                     @if ($connection)
+                        @php($connectionHealth = $health->get($connection->id))
                         <dl class="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                             <div><dt class="text-stone-500">Integração</dt><dd class="font-semibold">{{ $connection->name }}</dd></div>
                             <div><dt class="text-stone-500">Modo</dt><dd class="font-semibold">{{ $connection->enabled ? 'Ativo' : 'Inativo' }}</dd></div>
@@ -37,6 +38,12 @@
                             <div><dt class="text-stone-500">Última tentativa</dt><dd class="font-semibold">{{ $connection->last_attempt_at?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? '—' }}</dd></div>
                             <div><dt class="text-stone-500">Última conexão válida</dt><dd class="font-semibold">{{ $connection->last_success_at?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? '—' }}</dd></div>
                             <div><dt class="text-stone-500">Pendências / erros</dt><dd class="font-semibold">{{ $connection->pending_count }} / {{ $connection->failed_count }}</dd></div>
+                            <div><dt class="text-stone-500">Último sync</dt><dd class="font-semibold">{{ $connectionHealth['last_sync']?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? 'Nunca' }}</dd></div>
+                            <div><dt class="text-stone-500">Checkpoint</dt><dd class="font-semibold">{{ $connectionHealth['checkpoint']?->last_success_at?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? 'Ainda não criado' }}</dd></div>
+                            <div><dt class="text-stone-500">Staged / pronto / bloqueado</dt><dd class="font-semibold">{{ $connectionHealth['staged'] }} / {{ $connectionHealth['ready'] }} / {{ $connectionHealth['blocked'] }}</dd></div>
+                            <div><dt class="text-stone-500">Importado / revertido</dt><dd class="font-semibold">{{ $connectionHealth['imported'] }} / {{ $connectionHealth['reversed'] }}</dd></div>
+                            <div><dt class="text-stone-500">Marco operacional</dt><dd class="font-semibold">{{ $connectionHealth['operational_start_at']?->setTimezone(config('app.timezone'))->format('d/m/Y H:i:s') ?? 'Não definido' }}</dd></div>
+                            <div><dt class="text-stone-500">Flags sync / import</dt><dd class="font-semibold">{{ $connectionHealth['sync_enabled'] ? 'ON' : 'OFF' }} / {{ $connectionHealth['import_enabled'] ? 'ON' : 'OFF' }}</dd></div>
                         </dl>
                         @if ($connection->last_error_message)
                             <div class="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
@@ -50,6 +57,7 @@
                             <a href="{{ route('pdv.reports.sales', $connection) }}" class="rounded-lg border px-3 py-2 text-sm font-bold">Consultar vendas</a>
                             <a href="{{ route('pdv.staging.index', $connection) }}" class="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">Pedidos preparados</a>
                             <a href="{{ route('pdv.mappings', $connection) }}" class="rounded-lg border px-3 py-2 text-sm font-bold">Mapeamentos / Readiness</a>
+                            <a href="{{ route('pdv.reconciliation', $connection) }}" class="rounded-lg border px-3 py-2 text-sm font-bold">Conciliação GrandChef × ERP</a>
                             <a href="{{ route('pdv.events', $connection) }}" class="rounded-lg border px-3 py-2 text-sm font-bold">Observabilidade</a>
                         </div>
                     @elseif ($location->type === \App\Models\Location::TYPE_STORE)

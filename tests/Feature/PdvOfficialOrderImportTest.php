@@ -40,6 +40,7 @@ use Brick\Math\RoundingMode;
 use Database\Seeders\AuthorizationSeeder;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
 
@@ -363,6 +364,35 @@ class PdvOfficialOrderImportTest extends TestCase
         $this->assertSame('Cancelamento de teste', $event->metadata['reason']);
         $this->assertCount(1, $event->metadata['reversal_payment_ids']);
         $this->assertCount(1, $event->metadata['reversal_stock_movement_ids']);
+    }
+
+    public function test_reversal_route_requires_explicit_confirmation_and_remains_idempotent(): void
+    {
+        $this->stock($this->products['P1'], '10');
+        $order = $this->order([$this->item('I1', 'P1', '2', '10', '20')], [$this->payment('PAY', 'CASH', 'Dinheiro', 'dinheiro', '20')], '20');
+        config()->set('pdv.import_enabled', true);
+        app(PdvOrderImportService::class)->execute($order, $this->admin);
+        $order->update(['external_status' => 'cancelled']);
+
+        $this->actingAs($this->admin)->get(route('pdv.staging.show', [$this->connection, $order]))
+            ->assertOk()->assertSee('Reversão administrativa')->assertSee('Digite ESTORNAR');
+        $this->actingAs($this->admin)->post(route('pdv.staging.reverse', [$this->connection, $order]), [
+            'reason' => 'Cancelamento externo confirmado.',
+            'confirmed' => '1',
+            'confirmation_text' => 'ERRADO',
+            'idempotency_key' => (string) Str::uuid(),
+        ])->assertSessionHasErrors('confirmation_text');
+        $this->assertDatabaseHas('product_sale_orders', ['pdv_order_id' => $order->id, 'status' => ProductSaleOrder::STATUS_COMPLETED]);
+
+        $payload = ['reason' => 'Cancelamento externo confirmado.', 'confirmed' => '1', 'confirmation_text' => 'ESTORNAR', 'idempotency_key' => (string) Str::uuid()];
+        $this->actingAs($this->admin)->post(route('pdv.staging.reverse', [$this->connection, $order]), $payload)->assertRedirect()->assertSessionHas('success');
+        $movementCount = StockMovement::query()->count();
+        $paymentCount = ProductSalePayment::query()->count();
+        $payload['idempotency_key'] = (string) Str::uuid();
+        $this->actingAs($this->admin)->post(route('pdv.staging.reverse', [$this->connection, $order]), $payload)->assertRedirect()->assertSessionHas('success');
+        $this->assertSame($movementCount, StockMovement::query()->count());
+        $this->assertSame($paymentCount, ProductSalePayment::query()->count());
+        $this->assertDatabaseHas('product_sale_orders', ['pdv_order_id' => $order->id, 'status' => ProductSaleOrder::STATUS_REVERSED, 'reversal_reason' => 'Cancelamento externo confirmado.']);
     }
 
     public function test_reports_use_items_for_product_revenue_and_payments_for_financial_totals_without_doubling(): void

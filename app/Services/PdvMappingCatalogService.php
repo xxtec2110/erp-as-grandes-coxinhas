@@ -190,8 +190,8 @@ class PdvMappingCatalogService
                     && ! $this->hasRateCoverage($connection, (string) $row->external_form_id, $mapping, $fromUtc, $toUtc);
                 $financialOptions = $compatibility['requires_rate']
                     ? $fees->where('payment_method', $compatibility['method'])
-                        ->filter(fn (PaymentFee $fee): bool => $fee->acquirer?->active && $fee->cardBrand?->active && $this->hasRateCoverageFor($connection, (string) $row->external_form_id, $fee->acquirer_id, $fee->card_brand_id, (string) $compatibility['method'], $fromUtc, $toUtc))
-                        ->unique(fn (PaymentFee $fee): string => $fee->acquirer_id.':'.$fee->card_brand_id)
+                        ->filter(fn (PaymentFee $fee): bool => $fee->acquirer?->active && ($fee->card_brand_id === null || $fee->cardBrand?->active) && $this->hasRateCoverageFor($connection, (string) $row->external_form_id, $fee->acquirer_id, $fee->card_brand_id, (string) $compatibility['method'], $fromUtc, $toUtc))
+                        ->unique(fn (PaymentFee $fee): string => $fee->acquirer_id.':'.($fee->card_brand_id ?? 'none'))
                         ->values()
                     : collect();
 
@@ -222,14 +222,14 @@ class PdvMappingCatalogService
 
     private function hasRateCoverage(PdvConnection $connection, string $externalFormId, PdvPaymentMethodMapping $mapping, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): bool
     {
-        if ($mapping->acquirer_id === null || $mapping->card_brand_id === null || $mapping->payment_method === null) {
+        if ($mapping->acquirer_id === null || $mapping->payment_method === null) {
             return false;
         }
 
         return $this->hasRateCoverageFor($connection, $externalFormId, $mapping->acquirer_id, $mapping->card_brand_id, $mapping->payment_method, $fromUtc, $toUtc);
     }
 
-    private function hasRateCoverageFor(PdvConnection $connection, string $externalFormId, int $acquirerId, int $cardBrandId, string $method, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): bool
+    private function hasRateCoverageFor(PdvConnection $connection, string $externalFormId, int $acquirerId, ?int $cardBrandId, string $method, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): bool
     {
         return DB::table('pdv_order_payments as payments')
             ->join('pdv_orders as orders', 'orders.id', '=', 'payments.pdv_order_id')

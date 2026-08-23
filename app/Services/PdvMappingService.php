@@ -72,10 +72,12 @@ class PdvMappingService
 
         $method = ProductSalePaymentMethod::from($data['payment_method']);
         $acquirerId = $method->requiresCardConfiguration() ? (int) $data['acquirer_id'] : null;
-        $cardBrandId = $method->requiresCardConfiguration() ? (int) $data['card_brand_id'] : null;
+        $cardBrandId = $method->requiresCardConfiguration() && filled($data['card_brand_id'] ?? null) ? (int) $data['card_brand_id'] : null;
         if ($method->requiresCardConfiguration()) {
             $this->activeAcquirer($acquirerId);
-            $this->activeCardBrand($cardBrandId);
+            if ($cardBrandId !== null) {
+                $this->activeCardBrand($cardBrandId);
+            }
             $this->configuredFee($acquirerId, $cardBrandId, $method->value);
         }
 
@@ -184,7 +186,7 @@ class PdvMappingService
         }
     }
 
-    private function configuredFee(int $acquirerId, int $cardBrandId, string $method): void
+    private function configuredFee(int $acquirerId, ?int $cardBrandId, string $method): void
     {
         if (! PaymentFee::query()->where('acquirer_id', $acquirerId)->where('card_brand_id', $cardBrandId)->where('payment_method', $method)->where('active', true)->where('is_current', true)->exists()) {
             throw ValidationException::withMessages(['financial_configuration' => 'Configuração financeira necessária antes de confirmar este mapping.']);

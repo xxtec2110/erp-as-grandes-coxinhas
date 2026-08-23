@@ -6,7 +6,7 @@ use App\Models\PaymentFee;
 
 class PaymentFeeResolver
 {
-    public function resolve(int $acquirerId, int $cardBrandId, string $method, ?int $installments, string $operationDate): ?PaymentFee
+    public function resolve(int $acquirerId, ?int $cardBrandId, string $method, ?int $installments, string $operationDate): ?PaymentFee
     {
         return PaymentFee::query()
             ->where('acquirer_id', $acquirerId)

@@ -19,7 +19,8 @@ class PaymentFeeController extends Controller
 {
     public function index(Request $request): View
     {
-        $fees = PaymentFee::query()->with(['acquirer', 'cardBrand', 'creator'])->when($request->integer('acquirer_id'), fn ($q, $id) => $q->where('acquirer_id', $id))->when($request->integer('card_brand_id'), fn ($q, $id) => $q->where('card_brand_id', $id))->when($request->string('payment_method')->isNotEmpty(), fn ($q) => $q->where('payment_method', $request->string('payment_method')))->when($request->string('scope')->toString() !== 'history', fn ($q) => $q->where('is_current', true))->latest('effective_from')->paginate(30)->withQueryString();
+        $brandFilter = $request->string('card_brand_id')->toString();
+        $fees = PaymentFee::query()->with(['acquirer', 'cardBrand', 'creator'])->when($request->integer('acquirer_id'), fn ($q, $id) => $q->where('acquirer_id', $id))->when($brandFilter === 'none', fn ($q) => $q->whereNull('card_brand_id'))->when(ctype_digit($brandFilter), fn ($q) => $q->where('card_brand_id', (int) $brandFilter))->when($request->string('payment_method')->isNotEmpty(), fn ($q) => $q->where('payment_method', $request->string('payment_method')))->when($request->string('scope')->toString() !== 'history', fn ($q) => $q->where('is_current', true))->latest('effective_from')->paginate(30)->withQueryString();
 
         return view('payment-fees.index', ['fees' => $fees, 'acquirers' => Acquirer::query()->orderBy('name')->get(), 'brands' => CardBrand::query()->orderBy('name')->get()]);
     }
@@ -51,7 +52,7 @@ class PaymentFeeController extends Controller
             throw ValidationException::withMessages(['import' => $e->getMessage()]);
         }
 
-return redirect()->route('payment-fees.index')->with('success', 'Lote confirmado e aplicado integralmente.');
+        return redirect()->route('payment-fees.index')->with('success', 'Lote confirmado e aplicado integralmente.');
     }
 
     public function reject(PaymentFeeImport $import, Request $request, PaymentFeeImportService $service): RedirectResponse

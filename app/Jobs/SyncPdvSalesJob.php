@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\PdvSyncService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class SyncPdvSalesJob implements ShouldQueue
 {
@@ -29,6 +30,12 @@ class SyncPdvSalesJob implements ShouldQueue
             ->where('enabled', true)
             ->whereNotNull('location_id')
             ->whereHas('location', fn ($query) => $query->where('active', true))
-            ->each(fn ($connection) => $sync->sync($connection, $user));
+            ->each(function ($connection) use ($sync, $user): void {
+                try {
+                    $sync->sync($connection, $user);
+                } catch (Throwable) {
+                    // PdvSyncService registra a falha sanitizada; as demais unidades devem continuar.
+                }
+            });
     }
 }

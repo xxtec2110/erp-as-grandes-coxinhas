@@ -160,9 +160,9 @@ class PdvOrderReconciliationService
             } elseif (! $this->paymentCompatibility->supportsMethod($mapping->payment_method) || $mapping->payment_method !== $compatibility['method']) {
                 $reason = 'unsupported_method';
                 $this->block($blockers, 'payment_mapping_unsupported', 'O mapping não representa corretamente a forma externa.', ['payment_id' => $payment->id]);
-            } elseif (in_array($mapping->payment_method, ['debit', 'credit'], true) && ($mapping->acquirer_id === null || $mapping->card_brand_id === null || ! $mapping->acquirer?->active || ! $mapping->cardBrand?->active)) {
+            } elseif (in_array($mapping->payment_method, ['debit', 'credit'], true) && ($mapping->acquirer_id === null || ! $mapping->acquirer?->active || ($mapping->card_brand_id !== null && ! $mapping->cardBrand?->active))) {
                 $reason = 'incomplete_financial_mapping';
-                $this->block($blockers, 'payment_mapping_incomplete', 'O mapping de cartão precisa de adquirente e bandeira ativos.', ['payment_id' => $payment->id]);
+                $this->block($blockers, 'payment_mapping_incomplete', 'O mapping de cartão precisa de adquirente ativa; a bandeira só é exigida quando configurada pela regra financeira.', ['payment_id' => $payment->id]);
             } elseif (in_array($mapping->payment_method, ['debit', 'credit'], true)) {
                 $fee = $this->resolveFee($order, $payment, $mapping);
                 if ($fee === null) {
@@ -291,10 +291,10 @@ class PdvOrderReconciliationService
     private function resolveFee(PdvOrder $order, PdvOrderPayment $payment, PdvPaymentMethodMapping $mapping): ?PaymentFee
     {
         $operationDate = $order->external_completed_at?->setTimezone(config('app.timezone'))->toDateString();
-        if ($operationDate === null || $mapping->acquirer_id === null || $mapping->card_brand_id === null || $mapping->payment_method === null) {
+        if ($operationDate === null || $mapping->acquirer_id === null || $mapping->payment_method === null) {
             return null;
         }
-        $key = implode(':', [$mapping->acquirer_id, $mapping->card_brand_id, $mapping->payment_method, $payment->installments ?? '', $operationDate]);
+        $key = implode(':', [$mapping->acquirer_id, $mapping->card_brand_id ?? 'none', $mapping->payment_method, $payment->installments ?? '', $operationDate]);
 
         return $this->feeCache[$key] ??= $this->fees->resolve($mapping->acquirer_id, $mapping->card_brand_id, $mapping->payment_method, $payment->installments, $operationDate);
     }

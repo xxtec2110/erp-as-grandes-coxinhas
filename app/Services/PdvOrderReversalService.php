@@ -21,7 +21,16 @@ class PdvOrderReversalService
         private PdvIntegrationEventService $events,
     ) {}
 
-    public function reverse(PdvOrder $order, User $user, string $reason): ProductSaleOrder
+    public function eligible(PdvOrder $order): bool
+    {
+        $order->loadMissing('officialSaleOrder');
+
+        return $order->processing_state === PdvOrder::STATE_IMPORTED
+            && $order->officialSaleOrder?->status === ProductSaleOrder::STATUS_COMPLETED
+            && in_array(mb_strtolower($order->external_status), ['cancelado', 'cancelled', 'voided', 'estornado', 'refunded', 'reversed'], true);
+    }
+
+    public function reverse(PdvOrder $order, User $user, string $reason, ?string $requestIdempotencyKey = null): ProductSaleOrder
     {
         if (! config('pdv.import_enabled', false)) {
             throw new IntegrationNotConfiguredException('A operação oficial de PDV está desabilitada.');
@@ -30,7 +39,7 @@ class PdvOrderReversalService
         $this->access->authorizeConnection($user, $connection);
         $this->access->assertOperationalScope($connection);
 
-        return DB::transaction(function () use ($order, $user, $reason, $connection): ProductSaleOrder {
+        return DB::transaction(function () use ($order, $user, $reason, $connection, $requestIdempotencyKey): ProductSaleOrder {
             $locked = PdvOrder::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
             $official = ProductSaleOrder::query()->where('pdv_order_id', $locked->id)->with(['sales', 'payments.allocations'])->lockForUpdate()->firstOrFail();
             if ($official->status === ProductSaleOrder::STATUS_REVERSED) {
@@ -96,6 +105,7 @@ class PdvOrderReversalService
                 'reversal_payment_ids' => $reversalPaymentIds,
                 'reversal_stock_movement_ids' => $reversalMovementIds,
                 'reason' => $reason,
+                'request_idempotency_key' => $requestIdempotencyKey,
             ]);
 
             return $official->refresh()->load(['sales', 'payments.allocations']);

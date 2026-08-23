@@ -124,5 +124,20 @@
             <button @disabled(! $importPlan['can_execute']) class="mt-4 rounded-lg bg-stone-900 px-5 py-3 font-bold text-white disabled:cursor-not-allowed disabled:bg-stone-300">Confirmar importação atômica</button>
             @if (! $importPlan['import_enabled'])<p class="mt-2 text-xs font-semibold text-red-700">Botão bloqueado pela feature flag PDV_IMPORT_ENABLED=false.</p>@endif
         </form>
+
+        @if ($order->processing_state === \App\Models\PdvOrder::STATE_REVERSED)
+            <section class="rounded-xl border border-stone-300 bg-stone-50 p-5"><h2 class="font-bold">Pedido revertido</h2><p class="mt-1 text-sm text-stone-600">A venda original, seus snapshots e a trilha de auditoria foram preservados. Estoque e pagamentos receberam contrapartidas oficiais.</p></section>
+        @elseif ($reversalEligible)
+            <form method="POST" action="{{ route('pdv.staging.reverse', [$connection, $order]) }}" class="rounded-xl border border-red-300 bg-red-50 p-5">
+                @csrf
+                <input type="hidden" name="idempotency_key" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
+                <h2 class="font-bold text-red-950">Reversão administrativa</h2>
+                <p class="mt-1 text-sm text-red-900">Disponível porque o pedido importado consta como cancelado/estornado na origem. A ação não apaga o original.</p>
+                <label class="mt-4 block text-sm font-bold">Motivo obrigatório<textarea name="reason" rows="3" maxlength="1000" class="mt-1 w-full rounded-lg border-red-300" required></textarea></label>
+                <label class="mt-3 flex gap-2 text-sm font-bold"><input type="checkbox" name="confirmed" value="1" class="mt-1 rounded border-red-300" required> Confirmo a reversão oficial, inclusive as contrapartidas de estoque e pagamentos.</label>
+                <label class="mt-3 block text-sm font-bold">Digite ESTORNAR para confirmar<input name="confirmation_text" autocomplete="off" class="mt-1 w-full rounded-lg border-red-300" required></label>
+                <button class="mt-4 rounded-lg bg-red-800 px-5 py-3 font-bold text-white">Executar reversão oficial</button>
+            </form>
+        @endif
     </div>
 @endsection

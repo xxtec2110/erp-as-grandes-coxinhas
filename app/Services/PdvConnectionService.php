@@ -10,7 +10,7 @@ use Illuminate\Validation\ValidationException;
 
 class PdvConnectionService
 {
-    public function __construct(private PdvConnectionAccessService $access) {}
+    public function __construct(private PdvConnectionAccessService $access, private PdvIntegrationEventService $events) {}
 
     public function create(Location $location, array $data, User $user): PdvConnection
     {
@@ -27,7 +27,10 @@ class PdvConnectionService
         return DB::transaction(function () use ($location, $data, $user): PdvConnection {
             $connection = new PdvConnection(['provider' => 'grandchef', 'location_id' => $location->id, 'created_by' => $user->id]);
 
-            return $this->persist($connection, $data);
+            $connection = $this->persist($connection, $data);
+            $this->recordChange('connection_created', $connection, $user, [], $data);
+
+            return $connection;
         });
     }
 
@@ -53,10 +56,14 @@ class PdvConnectionService
                 throw ValidationException::withMessages(['location_id' => 'Esta unidade já possui uma conexão GrandChef.']);
             }
 
+            $before = $this->safeConfiguration($connection);
             $connection->location_id = $location->id;
             $connection->created_by ??= $user->id;
 
-            return $this->persist($connection, $data);
+            $connection = $this->persist($connection, $data);
+            $this->recordChange('connection_updated', $connection, $user, $before, $data);
+
+            return $connection;
         });
     }
 
@@ -109,6 +116,31 @@ class PdvConnectionService
     private function normalizeCredential(string $credential, string $prefix): string
     {
         return trim((string) preg_replace('/^'.preg_quote($prefix, '/').'\s+/i', '', trim($credential)));
+    }
+
+    /** @param array<string, mixed> $before @param array<string, mixed> $data */
+    private function recordChange(string $type, PdvConnection $connection, User $user, array $before, array $data): void
+    {
+        $this->events->record($type, $connection, user: $user, status: 'success', metadata: [
+            'before' => $before,
+            'after' => $this->safeConfiguration($connection),
+            'bearer_replaced' => filled($data['bearer_token'] ?? null),
+            'device_replaced' => filled($data['device_token'] ?? null),
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function safeConfiguration(PdvConnection $connection): array
+    {
+        $endpoint = (string) data_get($connection->configuration, 'endpoint', '');
+
+        return [
+            'location_id' => $connection->location_id,
+            'name' => $connection->name,
+            'enabled' => $connection->enabled,
+            'status' => $connection->status,
+            'endpoint_host' => $endpoint === '' ? null : parse_url($endpoint, PHP_URL_HOST),
+        ];
     }
 
     private function assertStore(Location $location): void

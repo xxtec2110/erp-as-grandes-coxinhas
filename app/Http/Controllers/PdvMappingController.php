@@ -23,7 +23,7 @@ use App\Services\PdvOperationalReadinessService;
 use App\Services\PdvOrderPreviewService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -105,7 +105,7 @@ class PdvMappingController extends Controller
         return $this->backToMappings($connection, $request->validated('from'), $request->validated('to'), count($rows).' mapping(s) de produto confirmado(s) manualmente.');
     }
 
-    public function legacyUpdate(PdvMappingRequest $request, PdvConnection $connection, PdvConnectionAccessService $access, PdvMappingService $mappings): RedirectResponse
+    public function legacyUpdate(PdvMappingRequest $request, PdvConnection $connection, PdvConnectionAccessService $access, PdvMappingService $mappings, PdvMappingAuditService $audits): RedirectResponse
     {
         $location = $access->assertOperationalScope($connection);
         $access->authorizeConnection($request->user(), $connection);
@@ -118,12 +118,16 @@ class PdvMappingController extends Controller
             $mappings->confirmPayment($connection, $mapping->external_method_code, $data, $request->user());
         } else {
             abort_unless((int) $data['target_id'] === $location->id, 422, 'O mapeamento de unidade precisa usar a unidade da conexão.');
-            DB::transaction(function () use ($connection, $data): void {
-                PdvLocationMapping::query()->whereBelongsTo($connection, 'connection')->lockForUpdate()->findOrFail($data['mapping_id'])->update([
+            $mapping = PdvLocationMapping::query()->whereBelongsTo($connection, 'connection')->findOrFail($data['mapping_id']);
+            $audits->execute($request->user(), $connection, 'location', (string) $mapping->external_location_id, 'confirm', (string) ($data['idempotency_key'] ?? Str::uuid()), function () use ($connection, $data): PdvLocationMapping {
+                $locked = PdvLocationMapping::query()->whereBelongsTo($connection, 'connection')->lockForUpdate()->findOrFail($data['mapping_id']);
+                $locked->update([
                     'location_id' => $data['target_id'],
                     'status' => 'confirmed',
                 ]);
-            });
+
+                return $locked->refresh();
+            }, $mapping, $data['reason'] ?? null);
         }
 
         return back()->with('success', 'Mapeamento atualizado.');
