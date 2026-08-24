@@ -87,6 +87,20 @@ Na confirmação, o backend revalida usuário ativo, permissão, unidades, entid
 
 `transfers.complete` permanece compatível com fluxos internos existentes, mas o Agente orienta e inicia novas transferências pelo ciclo criar → expedir → receber. `stock.opening_balance.record` continua excepcional e protegido por permissão própria.
 
+### Produção operacional e legado
+
+O comando conversacional comum de produção usa somente `production.orders.complete_batch`. Essa Tool exige simultaneamente `production.orders.create` e `production.orders.complete`, captura o snapshot da ficha atual pelo `ProductionRecipeSnapshotService` e delega a operação ao `ProductionOrderService`. Na confirmação, saldo e estado são revalidados dentro da transação; cada insumo recebe uma baixa oficial idempotente e o produto recebe uma única entrada oficial.
+
+`ProductionService` e as rotas web antigas de `/producao` permanecem preservados por compatibilidade. Eles registram `ProductionRecord` e, na conclusão, entrada do produto sem baixa de insumos. Por isso `production.plan` e `production.complete` não fazem parte do catálogo do Agente e não podem ser escolhidas pelo parser, Fake ou OpenAI.
+
+Produto sem ficha válida, ficha com componente sem preço atual ou saldo insuficiente falha sem criar ordem parcial ou movimento. Repetir a confirmação retorna o resultado anterior e não duplica movimentos.
+
+### Fichas e componentes
+
+`catalog.preparations.create/update` delega ao `PreparationCatalogService`; listas de ingredientes só são substituídas quando o payload as fornece explicitamente. `catalog.product_recipes.create/update` delega ao `ProductRecipeService`; criação e atualização são distintas, e uma atualização apenas de cabeçalho preserva os componentes. Quando `ingredients` ou `preparations` são enviados explicitamente, representam a lista completa desejada, podendo adicionar, alterar ou remover componentes.
+
+Ordens já planejadas mantêm seu `recipe_snapshot`. Alterar a ficha atual nunca reescreve snapshot, consumo ou custo histórico de produção anterior. O checklist de coleta dos dados reais está em `docs/ERP_MASTER_DATA_ONBOARDING.md`.
+
 ## OpenAI
 
 - `OpenAiProvider` usa Responses API com saída estruturada por JSON Schema.

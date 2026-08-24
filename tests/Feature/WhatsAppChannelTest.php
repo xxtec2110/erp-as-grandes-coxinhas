@@ -6,13 +6,18 @@ use App\Data\Stock\RecordStockMovementData;
 use App\Enums\StockMovementType;
 use App\Jobs\ProcessWhatsAppWebhook;
 use App\Models\AgentEvent;
+use App\Models\Ingredient;
 use App\Models\Location;
 use App\Models\Permission;
 use App\Models\Product;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Models\WhatsAppOutboundMessage;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\IngredientPriceService;
+use App\Services\IngredientStockService;
+use App\Services\ProductRecipeService;
 use App\Services\StockMovementService;
 use App\WhatsApp\FakeWhatsAppClient;
 use App\WhatsApp\TransientWhatsAppException;
@@ -103,17 +108,18 @@ class WhatsAppChannelTest extends TestCase
     public function test_write_confirmation_sim_no_and_idempotency_use_existing_agent_core(): void
     {
         $location = Location::query()->create(['name' => 'Fábrica Ibirá', 'type' => 'production', 'active' => true]);
-        $this->known('551100000005', ['production.create', 'agent.write.use'], [$location]);
-        Product::query()->create(['name' => 'Frango com Catupiry', 'stock_unit' => 'un', 'active' => true]);
+        $this->known('551100000005', ['production.orders.create', 'production.orders.complete', 'agent.write.use'], [$location]);
+        $this->productionProduct('Frango com Catupiry', $location, '100');
 
         $this->send('wamid.production.preview', '551100000005', 'PRODUZIMOS 100 FRANGO COM CATUPIRY');
         $this->assertStringContainsString('Confirmar', $this->client->sent()[0]['text']);
         $this->send('wamid.production.no', '551100000005', 'NÃO');
-        $this->assertDatabaseCount('production_records', 0);
+        $this->assertDatabaseCount('production_orders', 0);
 
         $this->send('wamid.production.preview2', '551100000005', 'PRODUZIMOS 100 FRANGO COM CATUPIRY');
         $this->send('wamid.production.yes', '551100000005', 'SIM');
-        $this->assertDatabaseCount('production_records', 1);
+        $this->assertDatabaseCount('production_orders', 1);
+        $this->assertDatabaseCount('stock_movements', 1);
         $this->assertDatabaseHas('agent_events', ['event_type' => 'confirmation_executed', 'channel' => 'whatsapp']);
     }
 
@@ -213,8 +219,8 @@ class WhatsAppChannelTest extends TestCase
     public function test_retry_after_confirmed_production_does_not_duplicate_the_operation(): void
     {
         $location = Location::query()->create(['name' => 'Fábrica Retry', 'type' => 'production', 'active' => true]);
-        $this->known('551100000010', ['production.create', 'agent.write.use'], [$location]);
-        Product::query()->create(['name' => 'Coxinha Retry', 'stock_unit' => 'un', 'active' => true]);
+        $this->known('551100000010', ['production.orders.create', 'production.orders.complete', 'agent.write.use'], [$location]);
+        $this->productionProduct('Coxinha Retry', $location, '10');
         $this->send('wamid.retry.preview', '551100000010', 'PRODUZIMOS 10 COXINHA RETRY');
         $payload = $this->payload('wamid.retry.confirm', '551100000010', 'SIM');
         $this->client->failNext();
@@ -226,7 +232,8 @@ class WhatsAppChannelTest extends TestCase
         }
         app(WhatsAppChannelAdapter::class)->handle($payload, 2, false, 30);
 
-        $this->assertDatabaseCount('production_records', 1);
+        $this->assertDatabaseCount('production_orders', 1);
+        $this->assertDatabaseCount('stock_movements', 1);
         $this->assertDatabaseCount('pending_agent_actions', 1);
         $this->assertDatabaseHas('whatsapp_inbound_messages', ['external_message_id' => 'wamid.retry.confirm', 'status' => 'processed', 'attempts' => 2]);
     }
@@ -264,6 +271,36 @@ class WhatsAppChannelTest extends TestCase
     private function send(string $messageId, string $from, ?string $text, string $type = 'text'): void
     {
         app(WhatsAppChannelAdapter::class)->handle($this->payload($messageId, $from, $text, $type));
+    }
+
+    private function productionProduct(string $name, Location $location, string $ingredientStock): Product
+    {
+        $supplier = Supplier::query()->create(['name' => 'Fornecedor '.$name, 'active' => true]);
+        $ingredient = Ingredient::query()->create(['name' => 'Insumo '.$name, 'base_unit' => 'un', 'active' => true]);
+        app(IngredientPriceService::class)->record($ingredient, [
+            'supplier_id' => $supplier->id,
+            'purchase_quantity' => '1',
+            'purchase_unit' => 'un',
+            'price_paid' => '1',
+            'effective_date' => '2026-08-24',
+        ]);
+        $product = Product::query()->create(['name' => $name, 'stock_unit' => 'un', 'active' => true]);
+        app(ProductRecipeService::class)->save($product, [
+            'yield_quantity' => '1',
+            'technical_loss_percentage' => '0',
+            'packaging_cost' => '0',
+            'ingredients' => [['ingredient_id' => $ingredient->id, 'quantity' => '1', 'unit' => 'un']],
+        ]);
+        app(IngredientStockService::class)->record([
+            'ingredient_id' => $ingredient->id,
+            'location_id' => $location->id,
+            'type' => 'positive_adjustment',
+            'quantity_delta' => $ingredientStock,
+            'operation_date' => '2026-08-24',
+            'idempotency_key' => 'opening-'.$product->id,
+        ]);
+
+        return $product;
     }
 
     private function payload(string $messageId, string $from, ?string $text, string $type = 'text'): array

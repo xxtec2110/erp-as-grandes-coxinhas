@@ -91,7 +91,7 @@ class OperationalConsolidationTest extends TestCase
     public function test_audio_grant_updates_permission_identity_and_audit(): void
     {
         $this->seed(AuthorizationSeeder::class);
-        $actor = User::factory()->create();
+        $actor = User::factory()->create(['name' => 'Administrador Master']);
         $target = User::factory()->unprivileged()->create(['name' => 'Guilherme']);
         UserExternalIdentity::query()->create(['user_id' => $target->id, 'channel' => 'local-test', 'external_user_id' => 'guilherme', 'status' => 'approved', 'active' => true, 'voice_allowed' => false]);
         app(AgentAccessManagementService::class)->permission(['target_user_name' => 'Guilherme', 'permission' => 'agent.audio.use'], $actor, true);
@@ -105,7 +105,7 @@ class OperationalConsolidationTest extends TestCase
     {
         $this->seed(AuthorizationSeeder::class);
         $user = User::factory()->create();
-        foreach (['losses.record', 'production.complete', 'transfers.create', 'transfers.dispatch', 'transfers.receive', 'agent.access.permission.grant'] as $tool) {
+        foreach (['losses.record', 'production.orders.complete_batch', 'transfers.create', 'transfers.dispatch', 'transfers.receive', 'agent.access.permission.grant'] as $tool) {
             try {
                 app(AgentToolExecutor::class)->execute($tool, [], $user);
                 $this->fail("{$tool} deveria exigir confirmação.");

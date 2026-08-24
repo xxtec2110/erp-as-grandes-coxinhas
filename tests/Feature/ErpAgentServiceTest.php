@@ -7,12 +7,18 @@ use App\Agent\ErpAgentResponse;
 use App\Agent\ErpAgentService;
 use App\Data\Stock\RecordStockMovementData;
 use App\Enums\StockMovementType;
+use App\Models\Ingredient;
 use App\Models\Location;
 use App\Models\Permission;
 use App\Models\Product;
+use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Services\CreatePayableService;
+use App\Services\IngredientPriceService;
+use App\Services\IngredientStockService;
+use App\Services\ProductRecipeService;
+use App\Services\StockBalanceService;
 use App\Services\StockMovementService;
 use Database\Seeders\AuthorizationSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -118,13 +124,35 @@ class ErpAgentServiceTest extends TestCase
 
     public function test_production_via_fake_provider_uses_official_service_after_confirmation(): void
     {
-        $this->known('producer', ['production.create'], [$this->ibira]);
+        $this->known('producer', ['production.orders.create', 'production.orders.complete'], [$this->ibira]);
+        $supplier = Supplier::query()->create(['name' => 'Fornecedor de produção', 'active' => true]);
+        $ingredientX = Ingredient::query()->create(['name' => 'Insumo X', 'base_unit' => 'un', 'active' => true]);
+        $ingredientY = Ingredient::query()->create(['name' => 'Insumo Y', 'base_unit' => 'un', 'active' => true]);
+        foreach ([$ingredientX, $ingredientY] as $ingredient) {
+            app(IngredientPriceService::class)->record($ingredient, ['supplier_id' => $supplier->id, 'purchase_quantity' => '1', 'purchase_unit' => 'un', 'price_paid' => '1', 'effective_date' => now()->toDateString()]);
+        }
         $product = Product::query()->create(['name' => 'Costela', 'stock_unit' => 'un', 'active' => true]);
-        $args = ['product_id' => $product->id, 'location_id' => $this->ibira->id, 'planned_quantity' => '100', 'operation_date' => now()->toDateString(), 'notes' => null];
-        $preview = $this->agent()->handle($this->message('producer', 'produzimos 100', 'production-1', ['tool' => 'production.plan', 'arguments' => $args]));
+        app(ProductRecipeService::class)->save($product, ['yield_quantity' => '1', 'technical_loss_percentage' => '0', 'packaging_cost' => '0', 'ingredients' => [
+            ['ingredient_id' => $ingredientX->id, 'quantity' => '2', 'unit' => 'un'],
+            ['ingredient_id' => $ingredientY->id, 'quantity' => '1', 'unit' => 'un'],
+        ]]);
+        app(IngredientStockService::class)->record(['ingredient_id' => $ingredientX->id, 'location_id' => $this->ibira->id, 'type' => 'positive_adjustment', 'quantity_delta' => '30', 'operation_date' => now()->toDateString(), 'idempotency_key' => 'production-x']);
+        app(IngredientStockService::class)->record(['ingredient_id' => $ingredientY->id, 'location_id' => $this->ibira->id, 'type' => 'positive_adjustment', 'quantity_delta' => '20', 'operation_date' => now()->toDateString(), 'idempotency_key' => 'production-y']);
+
+        $preview = $this->agent()->handle($this->message('producer', 'produzimos 10 Costela', 'production-1'));
         $this->assertSame('confirmation', $preview->responseType);
+        $this->assertDatabaseCount('stock_movements', 0);
+        $this->assertDatabaseCount('ingredient_stock_movements', 2);
         $this->agent()->handle($this->message('producer', 'SIM', 'production-2'));
-        $this->assertDatabaseHas('production_records', ['product_id' => $product->id, 'location_id' => $this->ibira->id, 'planned_quantity' => '100.000000']);
+        $this->agent()->handle($this->message('producer', 'SIM', 'production-3'));
+
+        $this->assertSame('10.000000', app(IngredientStockService::class)->balance($ingredientX->id, $this->ibira->id));
+        $this->assertSame('10.000000', app(IngredientStockService::class)->balance($ingredientY->id, $this->ibira->id));
+        $this->assertSame('10.000000', app(StockBalanceService::class)->balance($product, $this->ibira));
+        $this->assertDatabaseCount('production_orders', 1);
+        $this->assertDatabaseCount('stock_movements', 1);
+        $this->assertDatabaseCount('ingredient_stock_movements', 4);
+        $this->assertDatabaseCount('production_records', 0);
     }
 
     public function test_ambiguous_product_resolution_preserves_all_photo_items(): void

@@ -5,7 +5,6 @@ namespace App\Agent;
 use App\Models\FinancialAccount;
 use App\Models\Location;
 use App\Models\Payable;
-use App\Models\ProductionRecord;
 use App\Models\PurchaseDocument;
 use App\Models\PurchaseDocumentItem;
 use App\Models\StockTransfer;
@@ -27,7 +26,6 @@ use App\Services\OperationalSummaryService;
 use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
 use App\Services\ProductionRequirementService;
-use App\Services\ProductionService;
 use App\Services\ProductLossQueryService;
 use App\Services\ProductLossService;
 use App\Services\PurchaseDocumentActionService;
@@ -42,20 +40,20 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentOperationalReadService $operationalReads, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private ProductLossQueryService $lossQueries, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentOperationalReadService $operationalReads, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionOrderService $productionOrders, private ProductLossService $losses, private ProductLossQueryService $lossQueries, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
         $tool = $this->registry->get($name) ?? throw new DomainException('Ferramenta não registrada.');
         $location = $input['location_id'] ?? null;
         $this->authorization->authorize($user, $tool->permission, $tool->locationScoped && $location !== null ? (int) $location : null);
+        if ($name === 'production.orders.complete_batch') {
+            $this->authorization->authorize($user, 'production.orders.create', $location !== null ? (int) $location : null);
+        }
         if ($tool->writesData && $tool->confirmationRequired && ! $confirmed) {
             throw new DomainException('Esta operação exige confirmação.');
         }
 
-        if ($name === 'production.complete') {
-            $this->authorization->authorize($user, $tool->permission, ProductionRecord::query()->findOrFail($input['production_id'])->location_id);
-        }
         if (str_starts_with($name, 'transfers.') && $name !== 'transfers.list') {
             $transfer = isset($input['transfer_id']) ? StockTransfer::query()->findOrFail($input['transfer_id']) : null;
             $locationIds = $transfer ? [$transfer->source_location_id, $transfer->destination_location_id] : [$input['source_location_id'], $input['destination_location_id']];
@@ -99,11 +97,9 @@ class AgentToolExecutor
             'ingredient_stock.shortages.list' => $this->ingredientShortages->forLocation(Location::query()->findOrFail($input['location_id'])),
             'production.today' => $this->productionQuery->forDate(Location::query()->findOrFail($input['location_id']), $input['date'] ?? now()->toDateString()),
             'production.suggestions.list' => $this->productionRequirements->forLocation(Location::query()->findOrFail($input['location_id'])),
-            'production.plan' => $this->production->plan($input, $user->id),
             'production.orders.plan' => $this->productionOrders->plan($input, $user, 'agent'),
             'production.orders.complete_batch' => $this->productionOrders->planAndComplete($input, $user, 'agent'),
             'production.orders.query' => $this->productionQuery->orders($user, $input),
-            'production.complete' => $this->production->complete(ProductionRecord::query()->findOrFail($input['production_id']), (string) $input['actual_quantity'], $user->id),
             'losses.record' => $this->losses->record($input, $user->id),
             'losses.query' => $this->lossQueries->query($user, $input),
             'transfers.list' => $this->transfers->list($user, (int) $input['location_id'], $input['status'] ?? 'recent', $input),

@@ -47,7 +47,7 @@ class CatalogAgentToolService
             'catalog.ingredient_prices.add' => $this->addIngredientPrice($input),
             'catalog.preparations.create' => $this->createPreparation($input),
             'catalog.preparations.update' => $this->updatePreparation($input),
-            'catalog.product_recipes.create', 'catalog.product_recipes.update' => $this->saveRecipe($input, $user),
+            'catalog.product_recipes.create', 'catalog.product_recipes.update' => $this->saveRecipe($tool, $input, $user),
             default => throw new \DomainException('Ferramenta administrativa sem executor oficial.'),
         };
     }
@@ -163,10 +163,20 @@ class CatalogAgentToolService
         return Validator::make($input, ['name' => [$updating ? 'sometimes' : 'required', 'string', 'max:255'], 'description' => ['nullable', 'string'], 'initial_quantity' => ['nullable', 'decimal:0,6', 'gt:0'], 'initial_unit' => ['nullable', Rule::in(['kg', 'g', 'l', 'ml', 'un'])], 'expected_yield' => [$updating ? 'sometimes' : 'required', 'decimal:0,6', 'gt:0'], 'yield_unit' => [$updating ? 'sometimes' : 'required', Rule::in(['kg', 'g', 'l', 'ml', 'un'])], 'actual_final_quantity' => ['nullable', 'decimal:0,6', 'gt:0'], 'total_preparation_time_minutes' => [$updating ? 'sometimes' : 'required', 'integer', 'min:1'], 'notes' => ['nullable', 'string'], 'active' => ['nullable', 'boolean'], 'ingredients' => ['sometimes', 'array'], 'ingredients.*.ingredient_id' => ['required', 'exists:ingredients,id'], 'ingredients.*.quantity' => ['required', 'decimal:0,6', 'gt:0'], 'ingredients.*.unit' => ['required', Rule::in(['kg', 'g', 'l', 'ml', 'un'])]])->validate() + ($updating ? [] : ['active' => true]);
     }
 
-    private function saveRecipe(array $input, User $user): Model
+    private function saveRecipe(string $tool, array $input, User $user): Model
     {
+        $product = Product::query()->with(['recipe.ingredients', 'recipe.preparations'])->findOrFail($input['product_id']);
+        if ($tool === 'catalog.product_recipes.create' && $product->recipe !== null) {
+            throw new \DomainException('O produto já possui ficha técnica. Use a alteração da ficha existente.');
+        }
+        if ($tool === 'catalog.product_recipes.update' && $product->recipe === null) {
+            throw new \DomainException('O produto ainda não possui ficha técnica. Use a criação de ficha.');
+        }
         $data = Validator::make($input, ['product_id' => ['required', 'exists:products,id'], 'final_weight_grams' => ['nullable', 'decimal:0,6', 'gt:0'], 'yield_quantity' => ['required', 'decimal:0,6', 'gt:0'], 'technical_loss_percentage' => ['required', 'decimal:0,6', 'gte:0', 'lt:100'], 'packaging_cost' => ['required', 'decimal:0,6', 'gte:0'], 'selling_price' => ['nullable', 'decimal:0,4', 'gt:0'], 'notes' => ['nullable', 'string'], 'ingredients' => ['nullable', 'array'], 'ingredients.*.ingredient_id' => ['required', 'exists:ingredients,id'], 'ingredients.*.quantity' => ['required', 'decimal:0,6', 'gt:0'], 'ingredients.*.unit' => ['required', Rule::in(['kg', 'g', 'l', 'ml', 'un'])], 'preparations' => ['nullable', 'array'], 'preparations.*.preparation_id' => ['required', 'exists:preparations,id'], 'preparations.*.quantity' => ['required', 'decimal:0,6', 'gt:0'], 'preparations.*.unit' => ['required', Rule::in(['kg', 'g', 'l', 'ml', 'un'])]])->validate();
-        $product = Product::query()->findOrFail($data['product_id']);
+        if ($tool === 'catalog.product_recipes.update') {
+            $data['ingredients'] ??= $product->recipe->ingredients->map->only(['ingredient_id', 'quantity', 'unit'])->all();
+            $data['preparations'] ??= $product->recipe->preparations->map->only(['preparation_id', 'quantity', 'unit'])->all();
+        }
         unset($data['product_id']);
 
         return $this->recipes->save($product, $data, $user, 'agent', $input['idempotency_key']);

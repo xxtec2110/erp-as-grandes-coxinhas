@@ -204,6 +204,9 @@ class ErpAgentService
             throw new AuthorizationException('Operações de escrita não estão liberadas neste canal.');
         }
         $this->authorization->authorize($user, $tool->permission);
+        if ($name === 'production.orders.complete_batch') {
+            $this->authorization->authorize($user, 'production.orders.create');
+        }
         if (str_starts_with($name, 'dashboard.user_widgets.')) {
             $input = $this->dashboardVisibility->prepareAgentInput($name, $input, $user);
         }
@@ -213,6 +216,9 @@ class ErpAgentService
         $input = $this->resolveLocation($input, $user);
         if ($tool->locationScoped && isset($input['location_id'])) {
             $this->authorization->authorize($user, $tool->permission, (int) $input['location_id']);
+            if ($name === 'production.orders.complete_batch') {
+                $this->authorization->authorize($user, 'production.orders.create', (int) $input['location_id']);
+            }
         }
         if (str_starts_with($name, 'agent.access.')) {
             $input = $this->accessManagement->prepareAgentInput($name, $input, $user);
@@ -569,7 +575,7 @@ class ErpAgentService
         $options = [];
         foreach ([
             [['stock.view'], 'Consultar estoque', 'ESTOQUE'],
-            [['production.view', 'production.create', 'production_requirements.view'], 'Produção', 'PRODUÇÃO'],
+            [['production.view', 'production.orders.create', 'production.orders.complete', 'production_requirements.view'], 'Produção', 'PRODUÇÃO'],
             [['finance.payables.view', 'finance.payments.view', 'finance.reports.view'], 'Financeiro', 'FINANCEIRO'],
             [['purchases.view'], 'Compras', 'COMPRAS'],
             [['transfers.view'], 'Transferências', 'TRANSFERÊNCIAS'],
@@ -594,7 +600,7 @@ class ErpAgentService
         $definitions = match ($name) {
             'production' => [
                 ['production.view', 'Produção de hoje', 'PRODUÇÃO HOJE'],
-                ['production.create', 'Planejar: PRODUZIMOS <quantidade> <produto>', null],
+                [['production.orders.create', 'production.orders.complete'], 'Registrar: PRODUZIMOS <quantidade> <produto>', null],
                 ['production_requirements.view', 'Produção sugerida', 'PRODUÇÃO SUGERIDA'],
             ],
             'purchases' => [
@@ -616,7 +622,9 @@ class ErpAgentService
             default => [],
         };
         $options = collect($definitions)
-            ->filter(fn (array $definition) => $this->authorization->allows($user, $definition[0]))
+            ->filter(fn (array $definition) => is_array($definition[0])
+                ? collect($definition[0])->every(fn (string $permission) => $this->authorization->allows($user, $permission))
+                : $this->authorization->allows($user, $definition[0]))
             ->map(fn (array $definition) => ['label' => $definition[1], 'command' => $definition[2]])
             ->values()
             ->all();
@@ -831,8 +839,6 @@ class ErpAgentService
             'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'],
             'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'],
             'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'],
-            'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'],
-            'production.complete' => ['production_id', 'actual_quantity'],
             'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'],
             'transfers.create', 'transfers.complete' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'],
             'transfers.dispatch' => ['transfer_id', 'dispatch_date'],
@@ -848,7 +854,8 @@ class ErpAgentService
 
     private function allowedTools(User $user): array
     {
-        return array_filter($this->registry->all(), fn ($tool) => $this->authorization->allows($user, $tool->permission));
+        return array_filter($this->registry->all(), fn ($tool) => $this->authorization->allows($user, $tool->permission)
+            && ($tool->name !== 'production.orders.complete_batch' || $this->authorization->allows($user, 'production.orders.create')));
     }
 
     private function sourceKey(AgentMessage $message): string

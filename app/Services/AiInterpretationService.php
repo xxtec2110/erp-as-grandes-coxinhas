@@ -144,7 +144,7 @@ class AiInterpretationService
 
         if (! isset($fields['product_id']) && is_string($fields['product_name'] ?? null) && in_array($tool, [
             'catalog.products.update', 'catalog.products.update_price', 'catalog.product_aliases.create',
-            'production.plan', 'losses.record', 'losses.query', 'transfers.create', 'transfers.complete',
+            'losses.record', 'losses.query', 'transfers.create', 'transfers.complete',
         ], true)) {
             $matched = $this->products->resolveExactItems([['product_name' => $fields['product_name']]])[0];
             if (isset($matched['product_id'])) {

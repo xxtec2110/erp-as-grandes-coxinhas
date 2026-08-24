@@ -58,7 +58,7 @@ class DeterministicAgentCoherenceTest extends TestCase
 
     public function test_main_menu_and_submenus_are_permission_driven_and_executable(): void
     {
-        $user = $this->known('producer', ['production.view', 'production.create', 'production_requirements.view']);
+        $user = $this->known('producer', ['production.view', 'production.orders.create', 'production.orders.complete', 'production_requirements.view']);
 
         $menu = $this->agent('producer', 'MENU', 'menu-1');
         $this->assertSame(['PRODUÇÃO'], collect($menu->options)->pluck('command')->all());
@@ -85,18 +85,22 @@ class DeterministicAgentCoherenceTest extends TestCase
         $this->assertStringContainsString('Produzir: 60 un', $suggestions->message);
     }
 
-    public function test_deterministic_production_plan_requires_preview_confirmation_and_is_idempotent(): void
+    public function test_deterministic_production_command_uses_official_order_flow_and_blocks_missing_recipe(): void
     {
-        $this->known('planner', ['production.create']);
+        $this->known('planner', ['production.orders.create', 'production.orders.complete']);
         Product::query()->create(['name' => 'Costela', 'stock_unit' => 'un', 'active' => true]);
 
         $preview = $this->agent('planner', 'PRODUZIMOS 20 Costela', 'plan-1');
         $this->assertSame('confirmation', $preview->responseType);
         $this->assertDatabaseCount('production_records', 0);
 
-        $this->agent('planner', 'SIM', 'plan-2');
-        $this->agent('planner', 'SIM', 'plan-3');
-        $this->assertDatabaseCount('production_records', 1);
+        $confirmation = $this->agent('planner', 'SIM', 'plan-2');
+        $this->assertFalse($confirmation->success);
+        $this->assertSame('validation_error', $confirmation->errorCode);
+        $this->assertStringContainsString('não possui ficha técnica', $confirmation->message);
+        $this->assertDatabaseCount('production_orders', 0);
+        $this->assertDatabaseCount('production_records', 0);
+        $this->assertDatabaseCount('stock_movements', 0);
     }
 
     public function test_stock_command_formats_official_balance_and_denies_another_location(): void

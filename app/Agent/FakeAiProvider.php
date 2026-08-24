@@ -21,10 +21,12 @@ class FakeAiProvider implements AiProviderInterface
                 fn (Product $product) => mb_strtolower($product->name) === $name
             );
             if ($product !== null) {
-                return $this->make(['tool' => 'production.plan', 'arguments' => [
-                    'product_id' => $product->id,
-                    'planned_quantity' => str_replace(',', '.', $matches[1]),
-                    'operation_date' => now()->toDateString(),
+                return $this->make(['tool' => 'production.orders.complete_batch', 'arguments' => [
+                    'production_date' => now()->toDateString(),
+                    'items' => [[
+                        'product_id' => $product->id,
+                        'produced_quantity' => str_replace(',', '.', $matches[1]),
+                    ]],
                 ]], $message->messageType);
             }
         }

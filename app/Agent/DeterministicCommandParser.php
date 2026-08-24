@@ -113,11 +113,13 @@ class DeterministicCommandParser
 
             if ($product !== null) {
                 return [
-                    'tool' => 'production.plan',
+                    'tool' => 'production.orders.complete_batch',
                     'arguments' => [
-                        'product_id' => $product->id,
-                        'planned_quantity' => str_replace(',', '.', $matches[1]),
-                        'operation_date' => now()->toDateString(),
+                        'production_date' => now()->toDateString(),
+                        'items' => [[
+                            'product_id' => $product->id,
+                            'produced_quantity' => str_replace(',', '.', $matches[1]),
+                        ]],
                     ],
                 ];
             }
