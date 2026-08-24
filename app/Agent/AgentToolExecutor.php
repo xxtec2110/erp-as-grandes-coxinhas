@@ -11,6 +11,7 @@ use App\Models\PurchaseDocumentItem;
 use App\Models\StockTransfer;
 use App\Models\User;
 use App\Services\AgentAccessManagementService;
+use App\Services\AgentOperationalReadService;
 use App\Services\AuthorizationService;
 use App\Services\CatalogAgentToolService;
 use App\Services\CostQueryService;
@@ -40,7 +41,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentOperationalReadService $operationalReads, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
@@ -80,6 +81,14 @@ class AgentToolExecutor
             'dashboard.user_widgets.list' => $this->dashboardVisibility->inspect(User::query()->findOrFail($input['target_user_id']), $user),
             'dashboard.user_widgets.update' => $this->dashboardVisibility->updateFromAgent($input, $user, [...$context, 'tool' => $name]),
             'dashboard.user_widgets.reset' => $this->dashboardVisibility->reset(User::query()->findOrFail($input['target_user_id']), $user, 'agent', [...$context, 'tool' => $name], $input['idempotency_key'] ?? null),
+            'sales.summary' => $this->operationalReads->salesSummary(Location::query()->findOrFail($input['location_id']), $input),
+            'sales.products.ranking' => $this->operationalReads->productRanking(Location::query()->findOrFail($input['location_id']), $input),
+            'sales.payments.summary' => $this->operationalReads->paymentSummary(Location::query()->findOrFail($input['location_id']), $input),
+            'stock.products.query' => $this->operationalReads->productStock(Location::query()->findOrFail($input['location_id']), $input),
+            'stock.ingredients.query' => $this->operationalReads->ingredientStock(Location::query()->findOrFail($input['location_id']), $input),
+            'pdv.health' => $this->operationalReads->pdvHealth(Location::query()->findOrFail($input['location_id'])),
+            'pdv.reconciliation' => $this->operationalReads->pdvReconciliation(Location::query()->findOrFail($input['location_id']), $input),
+            'products.prices.query' => $this->operationalReads->catalogPrices($input),
             'stock.positions.list' => $this->stockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
             'stock.opening_balance.record' => $this->openingStock->record($input, $user),
             'ingredient_stock.positions.list' => $this->ingredientStockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),

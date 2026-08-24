@@ -41,14 +41,137 @@ class AgentResponseTemplate
     public function stock(iterable $positions, string $location): string
     {
         $lines = ['📦 ESTOQUE', '', '🏭 '.$location, ''];
-        $total = '0';
+        $totals = [];
         foreach ($positions as $position) {
             $lines[] = $position['product']->name.': '.DecimalFormatter::format($position['balance'], $position['product']->stock_unit === 'un' ? 0 : 3).' '.$position['product']->stock_unit;
-            $total = (string) BigDecimal::of($total)->plus($position['balance']);
+            $unit = $position['product']->stock_unit;
+            $totals[$unit] = (string) BigDecimal::of($totals[$unit] ?? '0')->plus($position['balance']);
         }
         $lines[] = '';
         $lines[] = '────────────';
-        $lines[] = 'Total: '.DecimalFormatter::format($total, 0);
+        foreach ($totals as $unit => $total) {
+            $lines[] = 'Total '.$unit.': '.DecimalFormatter::format($total, $unit === 'un' ? 0 : 3);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function salesSummary(array $result): string
+    {
+        $lines = ['📊 VENDAS — '.$result['location']['name'], $this->periodLabel($result['period'])];
+        if ((int) $result['sales_count'] === 0) {
+            $lines[] = '';
+            $lines[] = 'Nenhuma venda oficial encontrada no período.';
+
+            return implode("\n", $lines);
+        }
+        $lines[] = '';
+        $lines[] = 'Faturamento: R$ '.DecimalFormatter::format($result['revenue'], 2);
+        $lines[] = 'Vendas/pedidos: '.$result['sales_count'];
+        $lines[] = 'Itens vendidos: '.DecimalFormatter::format($result['quantity'], 3);
+        $lines[] = 'Ticket médio: R$ '.DecimalFormatter::format($result['average_ticket'], 2);
+        $lines[] = 'Descontos: R$ '.DecimalFormatter::format($result['discounts'], 2);
+
+        return implode("\n", $lines);
+    }
+
+    public function productRanking(array $result): string
+    {
+        $lines = ['🏆 PRODUTOS MAIS VENDIDOS — '.$result['location']['name'], $this->periodLabel($result['period']), ''];
+        foreach ($result['items'] as $item) {
+            $lines[] = $item['rank'].'. '.$item['name'].' — '.DecimalFormatter::format($item['quantity'], 3).' — R$ '.DecimalFormatter::format($item['revenue'], 2);
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhuma venda oficial encontrada no período.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function paymentSummary(array $result): string
+    {
+        $title = '💳 PAGAMENTOS — '.$result['location']['name'];
+        if ($result['filter'] !== null) {
+            $title .= ' — '.$result['filter'];
+        }
+        $lines = [$title, $this->periodLabel($result['period']), '', 'Bruto: R$ '.DecimalFormatter::format($result['gross'], 2), 'Taxas: R$ '.DecimalFormatter::format($result['fees'], 2), 'Líquido: R$ '.DecimalFormatter::format($result['net'], 2)];
+        foreach ($result['by_method'] as $method) {
+            $lines[] = $method['method'].': R$ '.DecimalFormatter::format($method['gross'], 2);
+        }
+        if ($result['by_method'] === []) {
+            $lines[] = 'Nenhum pagamento oficial encontrado.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function productStockQuery(array $result): string
+    {
+        $lines = ['📦 ESTOQUE DE PRODUTOS — '.$result['location']['name'], ''];
+        foreach ($result['items'] as $item) {
+            $lines[] = $item['name'].': '.DecimalFormatter::format($item['balance'], $item['unit'] === 'un' ? 0 : 3).' '.$item['unit'];
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhum saldo encontrado para a consulta.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function ingredientStockQuery(array $result): string
+    {
+        $lines = ['📦 ESTOQUE DE INSUMOS — '.$result['location']['name'], ''];
+        foreach ($result['items'] as $item) {
+            $lines[] = $item['name'].': '.DecimalFormatter::format($item['balance'], $item['unit'] === 'un' ? 0 : 3).' '.$item['unit'];
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Insumo não cadastrado ou sem posição de estoque disponível.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function pdvHealth(array $result): string
+    {
+        $lines = ['🔌 GRANDCHEF — '.$result['location']['name'], ''];
+        foreach ($result['connections'] as $connection) {
+            $lines[] = 'Conexão #'.$connection['connection_id'].': '.($connection['enabled'] ? 'ativa' : 'inativa');
+            $lines[] = 'Última sincronização: '.($connection['last_sync_at'] ?? 'não registrada');
+            $lines[] = 'Staging: '.$connection['staged'].' · prontos: '.$connection['ready'].' · bloqueados: '.$connection['blocked'];
+        }
+        if ($result['connections'] === []) {
+            $lines[] = 'Nenhuma conexão GrandChef configurada para esta unidade.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function pdvReconciliation(array $result): string
+    {
+        $lines = ['🔎 CONCILIAÇÃO PDV — '.$result['location']['name'], $this->periodLabel($result['period']), ''];
+        foreach ($result['connections'] as $connection) {
+            $summary = $connection['summary'];
+            $lines[] = 'Pedidos externos: '.$summary['external_orders'];
+            $lines[] = 'Importados: '.$summary['imported'].' · prontos: '.$summary['ready'].' · bloqueados: '.$summary['blocked'];
+            $lines[] = 'Diferença: R$ '.DecimalFormatter::format($summary['difference'], 2);
+            $lines[] = 'Inconsistências: '.$summary['inconsistencies'];
+        }
+        if ($result['connections'] === []) {
+            $lines[] = 'Nenhuma conexão GrandChef configurada para esta unidade.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function catalogPrices(array $result): string
+    {
+        $lines = ['🏷️ CATÁLOGO / PREÇOS', ''];
+        foreach ($result['items'] as $item) {
+            $lines[] = $item['name'].': '.($item['price'] === null ? 'preço não configurado' : 'R$ '.DecimalFormatter::format($item['price'], 2));
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhum produto oficial encontrado.';
+        }
 
         return implode("\n", $lines);
     }
@@ -198,5 +321,10 @@ class AgentResponseTemplate
         }
 
         return implode("\n", $lines);
+    }
+
+    private function periodLabel(array $period): string
+    {
+        return $period['from'] === $period['to'] ? $period['from'] : $period['from'].' a '.$period['to'];
     }
 }

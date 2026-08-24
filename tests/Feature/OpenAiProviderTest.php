@@ -45,6 +45,16 @@ class OpenAiProviderTest extends TestCase
         Http::assertSent(fn (Request $request) => data_get($request->data(), 'input.0.content.0.type') === 'input_file' && $request['model'] === 'document-test');
     }
 
+    public function test_sends_only_safe_conversation_context_to_support_follow_up(): void
+    {
+        Http::fake(['openai.invalid/*' => Http::response($this->response(['tool' => 'sales.summary', 'fields' => ['period' => 'yesterday']]), 200)]);
+
+        app(OpenAiProvider::class)->interpret(new AgentMessage('local', '1', 'follow-up', 'E ontem?'), ['sales.summary'], ['conversation' => ['last_tool' => 'sales.summary']]);
+
+        Http::assertSent(fn (Request $request) => str_contains((string) data_get($request->data(), 'input.0.content.0.text'), '"last_tool":"sales.summary"')
+            && data_get($request->data(), 'input.0.content.1.text') === 'E ontem?');
+    }
+
     public function test_missing_configuration_fails_closed_without_http(): void
     {
         config()->set('ai.openai.api_key', null);

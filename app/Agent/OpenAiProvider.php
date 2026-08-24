@@ -22,6 +22,9 @@ class OpenAiProvider implements AiProviderInterface
         if (filled($message->text)) {
             $content[] = ['type' => 'input_text', 'text' => $message->text];
         }
+        if (($conversation = $context['conversation'] ?? []) !== []) {
+            array_unshift($content, ['type' => 'input_text', 'text' => 'Contexto confiável da conversa, validado pelo ERP: '.json_encode($conversation, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]);
+        }
         foreach ($context['attachments'] ?? [] as $attachment) {
             $content[] = str_starts_with($attachment['mime_type'], 'image/')
                 ? ['type' => 'input_image', 'image_url' => 'data:'.$attachment['mime_type'].';base64,'.$attachment['data']]

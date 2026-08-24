@@ -98,6 +98,7 @@ class AgentAdministrationController extends Controller
             'tools' => $count('tool_executed'),
             'denied' => $count('action_denied'),
             'confirmations' => $count('confirmation_executed'),
+            'expired' => PendingAgentAction::query()->where('created_at', '>=', $month)->where('status', 'expired')->count(),
             'duplicates' => $count('duplicate_blocked'),
             'errors' => $count(['internal_error', 'action_denied']),
             'whatsapp_messages' => AgentEvent::query()->where('created_at', '>=', $month)->where('channel', 'whatsapp')->where('event_type', 'message_received')->count(),

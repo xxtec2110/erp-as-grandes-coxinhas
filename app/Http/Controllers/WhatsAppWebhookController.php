@@ -30,6 +30,11 @@ class WhatsAppWebhookController extends Controller
             return response('Channel disabled', 503);
         }
         $raw = $request->getContent();
+        if (strlen($raw) > (int) config('whatsapp.webhook_max_bytes', 1048576)) {
+            $events->record('whatsapp_event_rejected', 'whatsapp', status: 'rejected', errorCode: 'payload_too_large');
+
+            return response('Payload too large', 413);
+        }
         if (! $validator->valid($raw, $request->header('X-Hub-Signature-256'))) {
             $events->record('whatsapp_signature_rejected', 'whatsapp', status: 'rejected', errorCode: 'invalid_signature');
 

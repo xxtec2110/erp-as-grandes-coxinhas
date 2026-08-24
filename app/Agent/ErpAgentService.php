@@ -103,9 +103,13 @@ class ErpAgentService
         }
 
         $text = trim($message->text ?? '');
+        $expired = $this->pending->expireStaleForConversation($conversation->id) > 0;
         $active = $conversation->pendingActions()->where('status', 'pending')->latest()->first();
         if ($active !== null) {
             return $this->continuePending($active, $text, $user, $message);
+        }
+        if ($expired && in_array(mb_strtoupper($text), ['1', 'SIM', 'OK', 'CONFIRMAR', 'PODE CRIAR'], true)) {
+            return ErpAgentResponse::error('Esta ação expirou e não foi executada. Envie o comando novamente.', 'action_expired');
         }
         if (in_array(mb_strtoupper($text), ['OI', 'OLÁ', 'OLA', 'MENU', 'AJUDA'], true)) {
             return $this->menu($user);
@@ -191,6 +195,9 @@ class ErpAgentService
             $input['location_id'] = $conversation->context['location_id'];
         }
         $input = $this->resolveLocation($input, $user);
+        if ($tool->locationScoped && isset($input['location_id'])) {
+            $this->authorization->authorize($user, $tool->permission, (int) $input['location_id']);
+        }
         if (str_starts_with($name, 'agent.access.')) {
             $input = $this->accessManagement->prepareAgentInput($name, $input, $user);
         }
@@ -244,6 +251,11 @@ class ErpAgentService
             return $this->confirmation($action);
         }
         $result = $this->executor->execute($name, $input, $user);
+        $conversation->update(['context' => array_filter([
+            ...($conversation->context ?? []),
+            'location_id' => $input['location_id'] ?? ($conversation->context['location_id'] ?? null),
+            'last_tool' => $name,
+        ], fn (mixed $value): bool => $value !== null)]);
         $this->events->record('tool_executed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['location_id' => $input['location_id'] ?? null, 'result' => 'success'], status: 'success');
 
         return $this->format($name, $result, $input);
@@ -380,6 +392,11 @@ class ErpAgentService
             if (! $tool->writesData) {
                 $result = $this->executor->execute($action->tool_name, $action->payload, $user);
                 $action->update(['status' => 'executed', 'executed_at' => now(), 'result' => ['completed' => true]]);
+                $action->conversation?->update(['context' => [
+                    ...($action->conversation->context ?? []),
+                    'location_id' => $action->payload['location_id'],
+                    'last_tool' => $action->tool_name,
+                ]]);
 
                 return $this->format($action->tool_name, $result, $action->payload);
             }
@@ -568,6 +585,14 @@ class ErpAgentService
     private function format(string $name, mixed $result, array $input): ErpAgentResponse
     {
         return match ($name) {
+            'sales.summary' => new ErpAgentResponse(true, $this->templates->salesSummary($result), data: $result),
+            'sales.products.ranking' => new ErpAgentResponse(true, $this->templates->productRanking($result), data: $result),
+            'sales.payments.summary' => new ErpAgentResponse(true, $this->templates->paymentSummary($result), data: $result),
+            'stock.products.query' => new ErpAgentResponse(true, $this->templates->productStockQuery($result), data: $result),
+            'stock.ingredients.query' => new ErpAgentResponse(true, $this->templates->ingredientStockQuery($result), data: $result),
+            'pdv.health' => new ErpAgentResponse(true, $this->templates->pdvHealth($result), data: $result),
+            'pdv.reconciliation' => new ErpAgentResponse(true, $this->templates->pdvReconciliation($result), data: $result),
+            'products.prices.query' => new ErpAgentResponse(true, $this->templates->catalogPrices($result), data: $result),
             'stock.positions.list' => new ErpAgentResponse(true, $this->templates->stock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'ingredient_stock.positions.list' => new ErpAgentResponse(true, $this->templates->ingredientStock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'ingredient_stock.shortages.list' => new ErpAgentResponse(true, $this->templates->ingredientShortages($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
@@ -596,9 +621,14 @@ class ErpAgentService
 
                 return str_contains($normalizedName, $locationName) || str_contains($locationName, $normalizedName);
             });
-            if ($matches->count() === 1) {
-                $input['location_id'] = $matches->first()->id;
-            } unset($input['location_name']);
+            if ($matches->count() === 0) {
+                throw new AuthorizationException('Unidade não autorizada.');
+            }
+            if ($matches->count() > 1) {
+                throw new DomainException('A unidade informada é ambígua. Informe o nome completo.');
+            }
+            $input['location_id'] = $matches->first()->id;
+            unset($input['location_name']);
         }
         foreach (['source', 'destination'] as $side) {
             $nameKey = $side.'_location_name';
@@ -611,9 +641,13 @@ class ErpAgentService
 
                 return str_contains($normalizedName, $locationName) || str_contains($locationName, $normalizedName);
             });
-            if ($matches->count() === 1) {
-                $input[$side.'_location_id'] = $matches->first()->id;
+            if ($matches->count() === 0) {
+                throw new AuthorizationException('Unidade não autorizada.');
             }
+            if ($matches->count() > 1) {
+                throw new DomainException('A unidade informada é ambígua. Informe o nome completo.');
+            }
+            $input[$side.'_location_id'] = $matches->first()->id;
             unset($input[$nameKey]);
         }
         if (! isset($input['location_id']) && $user->default_location_id !== null && $locations->contains('id', $user->default_location_id)) {

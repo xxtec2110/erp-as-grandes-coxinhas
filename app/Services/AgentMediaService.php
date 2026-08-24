@@ -6,7 +6,6 @@ use App\Agent\AgentMessage;
 use App\Agent\AudioTranscriptionProviderInterface;
 use App\Models\AgentAttachment;
 use App\Models\User;
-use App\Models\UserExternalIdentity;
 use App\Models\WhatsAppInboundMessage;
 use App\WhatsApp\WhatsAppMediaDownloaderInterface;
 use DomainException;
@@ -27,8 +26,8 @@ class AgentMediaService
         if (! in_array($message->messageType, ['image', 'document', 'audio'], true)) {
             return $message;
         }
-        $identity = UserExternalIdentity::query()->with('user')->where('channel', $message->channel)->where('external_user_id', $message->externalUserId)->first();
-        if ($identity === null || ! $identity->active || $identity->status !== 'approved' || $identity->user === null) {
+        $identity = $inbound->identity()->with('user')->first();
+        if ($identity === null || $identity->channel !== $message->channel || ! $identity->active || $identity->status !== 'approved' || $identity->user === null) {
             return $message;
         }
         $permission = match ($message->messageType) {

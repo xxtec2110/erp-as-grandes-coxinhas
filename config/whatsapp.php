@@ -20,5 +20,6 @@ return [
     'default_country_code' => env('WHATSAPP_DEFAULT_COUNTRY_CODE', '55'),
     'unknown_contact_auto_reply' => (bool) env('WHATSAPP_UNKNOWN_CONTACT_AUTO_REPLY', false),
     'identity_rate_limit_per_minute' => (int) env('WHATSAPP_IDENTITY_RATE_LIMIT_PER_MINUTE', 30),
+    'webhook_max_bytes' => (int) env('WHATSAPP_WEBHOOK_MAX_BYTES', 1048576),
     'media_allowed_hosts' => ['lookaside.fbsbx.com', 'scontent.whatsapp.net', 'graph.facebook.com'],
 ];

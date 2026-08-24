@@ -3,6 +3,7 @@
 namespace App\Agent;
 
 use App\Services\AgentAccessManagementService;
+use App\Services\AgentOperationalReadService;
 use App\Services\CatalogAgentToolService;
 use App\Services\CostQueryService;
 use App\Services\CreatePayableService;
@@ -55,6 +56,14 @@ class AgentToolRegistry
             new AgentToolDefinition('dashboard.user_widgets.list', 'dashboard.permissions.manage', false, false, false, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null'], ['widgets' => 'array'], DashboardUserVisibilityService::class),
             new AgentToolDefinition('dashboard.user_widgets.update', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null', 'show' => 'array', 'hide' => 'array', 'mode' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
             new AgentToolDefinition('dashboard.user_widgets.reset', 'dashboard.permissions.manage', false, true, true, ['target_user_id' => 'integer|null', 'target_user_name' => 'string|null'], ['id' => 'integer'], DashboardUserVisibilityService::class),
+            new AgentToolDefinition('sales.summary', 'sales.view', true, false, false, ['location_id' => 'integer', 'period' => 'today|yesterday|week|month|null', 'from' => 'date|null', 'to' => 'date|null', 'payment_method' => 'string|null'], ['summary' => 'object'], AgentOperationalReadService::class),
+            new AgentToolDefinition('sales.products.ranking', 'sales.view', true, false, false, ['location_id' => 'integer', 'period' => 'today|yesterday|week|month|null', 'from' => 'date|null', 'to' => 'date|null', 'product_name' => 'string|null', 'limit' => 'integer|null'], ['items' => 'array'], AgentOperationalReadService::class),
+            new AgentToolDefinition('sales.payments.summary', 'sales.view', true, false, false, ['location_id' => 'integer', 'period' => 'today|yesterday|week|month|null', 'from' => 'date|null', 'to' => 'date|null', 'payment_method' => 'string|null'], ['summary' => 'object'], AgentOperationalReadService::class),
+            new AgentToolDefinition('stock.products.query', 'stock.view', true, false, false, ['location_id' => 'integer', 'product_name' => 'string|null', 'zero_only' => 'boolean|null', 'limit' => 'integer|null'], ['items' => 'array'], AgentOperationalReadService::class),
+            new AgentToolDefinition('stock.ingredients.query', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer', 'ingredient_name' => 'string|null', 'limit' => 'integer|null'], ['items' => 'array'], AgentOperationalReadService::class),
+            new AgentToolDefinition('pdv.health', 'pdv.manage', true, false, false, ['location_id' => 'integer'], ['connections' => 'array'], AgentOperationalReadService::class),
+            new AgentToolDefinition('pdv.reconciliation', 'pdv.manage', true, false, false, ['location_id' => 'integer', 'period' => 'today|yesterday|week|month|null', 'from' => 'date|null', 'to' => 'date|null'], ['connections' => 'array'], AgentOperationalReadService::class),
+            new AgentToolDefinition('products.prices.query', 'products.view', false, false, false, ['product_name' => 'string|null', 'limit' => 'integer|null'], ['items' => 'array'], AgentOperationalReadService::class),
             new AgentToolDefinition('stock.positions.list', 'stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], StockPositionService::class),
             new AgentToolDefinition('stock.opening_balance.record', 'stock.opening_balance', true, true, true, ['product_id' => 'integer', 'location_id' => 'integer', 'quantity' => 'decimal', 'operation_date' => 'date', 'notes' => 'string', 'idempotency_key' => 'string'], ['id' => 'integer'], OpeningStockService::class),
             new AgentToolDefinition('ingredient_stock.positions.list', 'ingredient_stock.view', true, false, false, ['location_id' => 'integer'], ['items' => 'array'], IngredientStockPositionService::class),

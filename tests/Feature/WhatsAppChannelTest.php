@@ -237,6 +237,17 @@ class WhatsAppChannelTest extends TestCase
         $this->assertDatabaseHas('agent_events', ['event_type' => 'whatsapp_event_rejected', 'error_code' => 'invalid_json']);
     }
 
+    public function test_oversized_webhook_is_rejected_before_queueing_or_parsing(): void
+    {
+        config()->set('whatsapp.webhook_max_bytes', 10);
+        Queue::fake();
+
+        $this->postRaw('{"payload":"too-large"}')->assertStatus(413);
+
+        Queue::assertNothingPushed();
+        $this->assertDatabaseHas('agent_events', ['event_type' => 'whatsapp_event_rejected', 'error_code' => 'payload_too_large']);
+    }
+
     private function known(string $externalId, array $permissions, array $locations = []): User
     {
         $user = User::factory()->unprivileged()->create(['name' => 'Operador WhatsApp']);
