@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Agent\AgentPeriodResolver;
+use App\Models\Ingredient;
 use App\Models\Location;
 use App\Models\PdvConnection;
 use App\Models\Product;
+use App\Models\Supplier;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Carbon\CarbonImmutable;
@@ -233,6 +235,81 @@ class AgentOperationalReadService
                 'price' => $item->currentPrice?->price,
                 'price_effective_date' => $item->currentPrice?->effective_date?->toDateString(),
                 'price_status' => $item->currentPrice === null ? 'not_configured' : 'current',
+            ])->all();
+
+        return ['items' => $items];
+    }
+
+    /** @return array<string, mixed> */
+    public function catalogProducts(array $input): array
+    {
+        $product = filled($input['product_name'] ?? null) ? $this->product((string) $input['product_name']) : null;
+        $items = Product::query()->with(['category', 'currentPrice', 'recipe'])
+            ->when($product, fn ($query) => $query->whereKey($product->id))
+            ->when(array_key_exists('active', $input) && $input['active'] !== null, fn ($query) => $query->where('active', filter_var($input['active'], FILTER_VALIDATE_BOOL)))
+            ->when(filter_var($input['without_price'] ?? false, FILTER_VALIDATE_BOOL), fn ($query) => $query->whereDoesntHave('currentPrice'))
+            ->when(filter_var($input['without_recipe'] ?? false, FILTER_VALIDATE_BOOL), fn ($query) => $query->whereDoesntHave('recipe'))
+            ->when(filled($input['category'] ?? null), fn ($query) => $query->whereHas('category', fn ($category) => $category->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower((string) $input['category']).'%'])))
+            ->orderBy('sort_order')->orderBy('name')
+            ->limit($this->limit($input, 30, 100))->get()
+            ->map(fn (Product $item): array => [
+                'product_id' => $item->id,
+                'name' => $item->name,
+                'category' => $item->category?->name,
+                'stock_unit' => $item->stock_unit,
+                'active' => (bool) $item->active,
+                'selling_price' => $item->currentPrice?->price,
+                'price_effective_date' => $item->currentPrice?->effective_date?->toDateString(),
+                'has_recipe' => $item->recipe !== null,
+            ])->all();
+
+        return ['items' => $items];
+    }
+
+    /** @return array<string, mixed> */
+    public function catalogIngredients(array $input): array
+    {
+        $ingredientId = null;
+        if (filled($input['ingredient_name'] ?? null)) {
+            $resolved = $this->ingredientResolver->resolve((string) $input['ingredient_name']);
+            if ($resolved['status'] !== 'resolved') {
+                throw new DomainException('Insumo não encontrado ou ambíguo no cadastro oficial.');
+            }
+            $ingredientId = $resolved['ingredient']->id;
+        }
+        $items = Ingredient::query()->with(['category', 'currentPrice.supplier'])
+            ->when($ingredientId, fn ($query) => $query->whereKey($ingredientId))
+            ->when(array_key_exists('active', $input) && $input['active'] !== null, fn ($query) => $query->where('active', filter_var($input['active'], FILTER_VALIDATE_BOOL)))
+            ->when(filter_var($input['without_price'] ?? false, FILTER_VALIDATE_BOOL), fn ($query) => $query->whereDoesntHave('currentPrice'))
+            ->orderBy('name')->limit($this->limit($input, 30, 100))->get()
+            ->map(fn (Ingredient $item): array => [
+                'ingredient_id' => $item->id,
+                'name' => $item->name,
+                'brand' => $item->brand,
+                'category' => $item->category?->name,
+                'base_unit' => $item->base_unit,
+                'active' => (bool) $item->active,
+                'current_base_unit_cost' => $item->currentPrice?->base_unit_cost,
+                'current_supplier' => $item->currentPrice?->supplier?->name,
+                'price_effective_date' => $item->currentPrice?->effective_date?->toDateString(),
+            ])->all();
+
+        return ['items' => $items];
+    }
+
+    /** @return array<string, mixed> */
+    public function suppliers(array $input): array
+    {
+        $items = Supplier::query()
+            ->when(filled($input['supplier_name'] ?? null), fn ($query) => $query->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower((string) $input['supplier_name']).'%']))
+            ->when(array_key_exists('active', $input) && $input['active'] !== null, fn ($query) => $query->where('active', filter_var($input['active'], FILTER_VALIDATE_BOOL)))
+            ->orderBy('name')->limit($this->limit($input, 30, 100))->get()
+            ->map(fn (Supplier $supplier): array => [
+                'supplier_id' => $supplier->id,
+                'name' => $supplier->name,
+                'contact_name' => $supplier->contact_name,
+                'phone' => $supplier->phone,
+                'active' => (bool) $supplier->active,
             ])->all();
 
         return ['items' => $items];

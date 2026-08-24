@@ -209,6 +209,26 @@ class AgentResponseTemplate
         return "📄 NOVA CONTA\n\nDescrição: ".($payload['description'] ?? 'Não informada')."\n💰 R$ ".DecimalFormatter::format((string) ($payload['expected_amount'] ?? '0'), 2)."\n📅 ".($payload['due_date'] ?? 'Não informada')."\n\nConfirmar?";
     }
 
+    public function payable(object $item): string
+    {
+        $remaining = (string) BigDecimal::of($item->expected_amount)->minus($item->paidAmount());
+
+        return "CONTA A PAGAR #{$item->id}\n\nDescrição: {$item->description}\nFornecedor: ".($item->supplier?->name ?? 'Não informado')."\nUnidade: {$item->location->name}\nVencimento: {$item->due_date->format('d/m/Y')}\nValor original: R$ ".DecimalFormatter::format($item->expected_amount, 2)."\nSaldo: R$ ".DecimalFormatter::format($remaining, 2)."\nStatus: {$item->status}";
+    }
+
+    public function financialAccounts(iterable $items): string
+    {
+        $lines = ['CONTAS FINANCEIRAS', ''];
+        foreach ($items as $item) {
+            $lines[] = '#'.$item->id.' — '.$item->name.' — '.$item->type;
+        }
+        if (count($lines) === 2) {
+            $lines[] = 'Nenhuma conta financeira ativa e autorizada.';
+        }
+
+        return implode("\n", $lines);
+    }
+
     public function productions(iterable $items, string $location, string $date): string
     {
         $lines = ['🏭 PRODUÇÃO DO DIA', '', $location.' — '.date('d/m/Y', strtotime($date)), ''];
@@ -318,6 +338,99 @@ class AgentResponseTemplate
 
         if (! $hasMovement) {
             $lines[] = 'Nenhum movimento no período.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function catalogProducts(array $result): string
+    {
+        $lines = ['PRODUTOS DO CATÁLOGO', ''];
+        foreach ($result['items'] as $item) {
+            $price = $item['selling_price'] === null ? 'sem preço' : 'R$ '.DecimalFormatter::format($item['selling_price'], 2);
+            $recipe = $item['has_recipe'] ? 'ficha cadastrada' : 'sem ficha';
+            $lines[] = '#'.$item['product_id'].' '.$item['name'].' — '.$price.' — '.$recipe.($item['active'] ? '' : ' — inativo');
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhum produto encontrado para os filtros informados.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function catalogIngredients(array $result): string
+    {
+        $lines = ['INSUMOS DO CATÁLOGO', ''];
+        foreach ($result['items'] as $item) {
+            $cost = $item['current_base_unit_cost'] === null
+                ? 'sem preço atual'
+                : 'R$ '.DecimalFormatter::format($item['current_base_unit_cost'], 8).'/'.$item['base_unit'];
+            $lines[] = '#'.$item['ingredient_id'].' '.$item['name'].' — '.$cost.($item['active'] ? '' : ' — inativo');
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhum insumo encontrado para os filtros informados.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function suppliers(array $result): string
+    {
+        $lines = ['FORNECEDORES', ''];
+        foreach ($result['items'] as $item) {
+            $lines[] = '#'.$item['supplier_id'].' '.$item['name'].($item['active'] ? '' : ' — inativo');
+        }
+        if ($result['items'] === []) {
+            $lines[] = 'Nenhum fornecedor encontrado para os filtros informados.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function purchaseSummary(array $result): string
+    {
+        return "RESUMO DE COMPRAS\n\nPeríodo: {$result['period']['from']} a {$result['period']['to']}\nDocumentos: {$result['count']}\nTotal: R$ ".DecimalFormatter::format($result['total'], 2)."\nPendentes de recebimento: {$result['pending_receipt']}\nParcialmente recebidos: {$result['partially_received']}\nRecebidos: {$result['received']}";
+    }
+
+    public function payments(iterable $items): string
+    {
+        $lines = ['PAGAMENTOS', ''];
+        foreach ($items as $payment) {
+            $lines[] = '#'.$payment->id.' — '.($payment->payable?->description ?? 'Conta').' — R$ '.DecimalFormatter::format($payment->amount, 2).' — '.$payment->paid_at->format('d/m/Y');
+        }
+        if (count($lines) === 2) {
+            $lines[] = 'Nenhum pagamento encontrado.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function productionOrders(iterable $items, string $location): string
+    {
+        $lines = ['ORDENS DE PRODUÇÃO', '', $location, ''];
+        foreach ($items as $order) {
+            $lines[] = '#'.$order->id.' — '.$order->production_date->format('d/m/Y').' — '.$order->status;
+            foreach ($order->items as $item) {
+                $quantity = $item->produced_quantity ?? $item->planned_quantity;
+                $lines[] = $item->product->name.': '.DecimalFormatter::format($quantity, $item->product->stock_unit === 'un' ? 0 : 3).' '.$item->product->stock_unit;
+            }
+            $lines[] = '';
+        }
+        if (count($lines) === 4) {
+            $lines[] = 'Nenhuma ordem encontrada no período.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    public function losses(iterable $items, string $location): string
+    {
+        $lines = ['PERDAS DE PRODUTOS', '', $location, ''];
+        foreach ($items as $loss) {
+            $lines[] = '#'.$loss->id.' — '.$loss->product->name.': '.DecimalFormatter::format($loss->quantity, $loss->product->stock_unit === 'un' ? 0 : 3).' '.$loss->product->stock_unit.' — '.$loss->reason->name.' — '.$loss->operation_date->format('d/m/Y');
+        }
+        if (count($lines) === 4) {
+            $lines[] = 'Nenhuma perda encontrada no período.';
         }
 
         return implode("\n", $lines);

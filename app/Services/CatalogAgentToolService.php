@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Ingredient;
 use App\Models\Preparation;
 use App\Models\Product;
-use App\Models\ProductCategory;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Rules\Cnpj;
@@ -56,7 +55,6 @@ class CatalogAgentToolService
     private function createProduct(array $input, User $user): Product
     {
         $data = Validator::make($input, ['name' => ['required', 'string', 'max:255'], 'selling_price' => ['required', 'decimal:0,4', 'gt:0'], 'product_category_id' => ['nullable', 'exists:product_categories,id'], 'stock_unit' => ['nullable', Rule::in(['g', 'ml', 'un'])], 'sort_order' => ['nullable', 'integer', 'min:1'], 'active' => ['nullable', 'boolean'], 'aliases' => ['nullable', 'array'], 'aliases.*' => ['string', 'max:255']])->validate();
-        $data['product_category_id'] ??= ProductCategory::query()->whereRaw('lower(name) = ?', ['coxinhas'])->value('id');
         $aliases = $data['aliases'] ?? [];
         unset($data['aliases']);
 

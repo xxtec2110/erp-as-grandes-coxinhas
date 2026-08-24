@@ -28,6 +28,7 @@ use App\Services\ProductionOrderService;
 use App\Services\ProductionQueryService;
 use App\Services\ProductionRequirementService;
 use App\Services\ProductionService;
+use App\Services\ProductLossQueryService;
 use App\Services\ProductLossService;
 use App\Services\PurchaseDocumentActionService;
 use App\Services\PurchaseQueryService;
@@ -41,7 +42,7 @@ use DomainException;
 
 class AgentToolExecutor
 {
-    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentOperationalReadService $operationalReads, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
+    public function __construct(private AgentToolRegistry $registry, private AuthorizationService $authorization, private AgentOperationalReadService $operationalReads, private CatalogAgentToolService $catalog, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private FinanceQueryService $finance, private PurchaseQueryService $purchases, private FinanceReportService $reports, private CreatePayableService $createPayable, private RegisterPaymentService $registerPayment, private CreatePurchaseDocumentService $createDocument, private PurchaseDocumentActionService $purchaseActions, private PurchaseReceiptService $purchaseReceipts, private CostQueryService $costs, private StockPositionService $stockPositions, private IngredientStockPositionService $ingredientStockPositions, private IngredientShortageService $ingredientShortages, private ProductionQueryService $productionQuery, private ProductionRequirementService $productionRequirements, private ProductionService $production, private ProductionOrderService $productionOrders, private ProductLossService $losses, private ProductLossQueryService $lossQueries, private StockTransferQueryService $transfers, private StockTransferService $transferOperations, private OperationalSummaryService $operationalSummary, private OpeningStockService $openingStock, private UndoLastOperationService $undo) {}
 
     public function execute(string $name, array $input, User $user, bool $confirmed = false, array $context = []): mixed
     {
@@ -89,6 +90,9 @@ class AgentToolExecutor
             'pdv.health' => $this->operationalReads->pdvHealth(Location::query()->findOrFail($input['location_id'])),
             'pdv.reconciliation' => $this->operationalReads->pdvReconciliation(Location::query()->findOrFail($input['location_id']), $input),
             'products.prices.query' => $this->operationalReads->catalogPrices($input),
+            'products.catalog.query' => $this->operationalReads->catalogProducts($input),
+            'ingredients.catalog.query' => $this->operationalReads->catalogIngredients($input),
+            'suppliers.catalog.query' => $this->operationalReads->suppliers($input),
             'stock.positions.list' => $this->stockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
             'stock.opening_balance.record' => $this->openingStock->record($input, $user),
             'ingredient_stock.positions.list' => $this->ingredientStockPositions->forLocation(Location::query()->findOrFail($input['location_id'])),
@@ -98,9 +102,11 @@ class AgentToolExecutor
             'production.plan' => $this->production->plan($input, $user->id),
             'production.orders.plan' => $this->productionOrders->plan($input, $user, 'agent'),
             'production.orders.complete_batch' => $this->productionOrders->planAndComplete($input, $user, 'agent'),
+            'production.orders.query' => $this->productionQuery->orders($user, $input),
             'production.complete' => $this->production->complete(ProductionRecord::query()->findOrFail($input['production_id']), (string) $input['actual_quantity'], $user->id),
             'losses.record' => $this->losses->record($input, $user->id),
-            'transfers.list' => $this->transfers->list($user, (int) $input['location_id'], $input['status'] ?? 'recent'),
+            'losses.query' => $this->lossQueries->query($user, $input),
+            'transfers.list' => $this->transfers->list($user, (int) $input['location_id'], $input['status'] ?? 'recent', $input),
             'transfers.create' => $this->transferOperations->create($input, $user->id),
             'transfers.complete' => $this->transferOperations->complete($input, $user->id),
             'transfers.dispatch' => $this->transferOperations->dispatch(StockTransfer::query()->findOrFail($input['transfer_id']), $input['dispatch_date'], $user->id),
@@ -113,10 +119,12 @@ class AgentToolExecutor
             'finance.payments.list' => $this->finance->payments($user, $input),
             'finance.accounts.list' => FinancialAccount::query()->where('active', true)->where(fn ($q) => $q->whereNull('location_id')->orWhereIn('location_id', $this->authorization->accessibleLocations($user)->pluck('id')))->get(),
             'finance.reports.summary' => $this->reports->summary([$this->locationId($input, $user)], ...$this->period($input)),
-            'purchases.documents.list' => $this->purchases->documents($user, isset($input['location_id']) ? (int) $input['location_id'] : null),
+            'purchases.documents.list' => $this->purchases->documents($user, isset($input['location_id']) ? (int) $input['location_id'] : null, $input),
             'purchases.documents.get' => $this->purchases->document($user, (int) $input['id']),
-            'purchases.documents.create' => $this->createPurchase($input, $user),
+            'purchases.documents.create' => $this->createDocument->create($input, $user, 'agent'),
+            'purchases.receipts.receive' => $this->receivePurchase($input, $user),
             'purchases.items.list' => $this->purchases->items($user, (int) $input['document_id']),
+            'purchases.summary' => $this->purchases->summary($user, $input),
             'purchases.history' => $this->purchases->history($user, $input),
             'costs.ingredients.current' => $this->costs->ingredientCurrent($user, (int) $input['ingredient_id']),
             'costs.ingredients.history' => $this->costs->ingredientHistory($user, (int) $input['ingredient_id']),
@@ -142,16 +150,32 @@ class AgentToolExecutor
         return $this->transferOperations->receive($transfer, $input['received_date'], [$transfer->items->sole()->id => (string) $input['quantity_received']], $user->id);
     }
 
-    private function createPurchase(array $input, User $user): PurchaseDocument
+    private function receivePurchase(array $input, User $user): PurchaseDocument
     {
-        $received = filter_var($input['received'] ?? false, FILTER_VALIDATE_BOOL);
-        $receivedDate = $input['received_date'] ?? $input['issue_date'] ?? now()->toDateString();
-        $document = $this->createDocument->create($input, $user, 'agent');
-        if ($received && $document->source_type !== 'quote') {
-            return $this->purchaseReceipts->receive($document, $receivedDate, $user, 'agent');
+        $document = PurchaseDocument::query()->with('items')->findOrFail($input['document_id']);
+        $quantities = [];
+        foreach ($input['items'] ?? [] as $item) {
+            if (! isset($item['item_id'], $item['quantity'])) {
+                throw new DomainException('Cada item recebido exige item_id e quantidade.');
+            }
+            if (isset($quantities[(int) $item['item_id']])) {
+                throw new DomainException('O mesmo item não pode aparecer duas vezes no recebimento.');
+            }
+            $quantities[(int) $item['item_id']] = (string) $item['quantity'];
+        }
+        $foreignItemIds = array_diff(array_keys($quantities), $document->items->pluck('id')->all());
+        if ($foreignItemIds !== []) {
+            throw new DomainException('Um item informado não pertence ao documento selecionado.');
         }
 
-        return $document;
+        return $this->purchaseReceipts->receivePartial(
+            $document,
+            (string) $input['received_date'],
+            $quantities,
+            (string) $input['idempotency_key'],
+            $user,
+            'agent',
+        );
     }
 
     /** @return array{string,string} */

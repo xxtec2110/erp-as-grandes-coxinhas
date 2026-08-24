@@ -12,6 +12,8 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class StockTransferService
 {
@@ -23,6 +25,20 @@ class StockTransferService
     /** @param array<string, mixed> $data */
     public function create(array $data, ?int $userId): StockTransfer
     {
+        $validator = Validator::make($data, [
+            'source_location_id' => ['required', Rule::exists('locations', 'id')->where('active', true)],
+            'destination_location_id' => ['required', 'different:source_location_id', Rule::exists('locations', 'id')->where('active', true)],
+            'product_id' => ['required', Rule::exists('products', 'id')->where('active', true)],
+            'quantity' => ['required', 'decimal:0,6', 'gt:0'],
+            'operation_date' => ['required', 'date'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $data = $validator->validated();
+
         return DB::transaction(function () use ($data, $userId): StockTransfer {
             $existing = StockTransfer::query()->where('idempotency_key', $data['idempotency_key'])->first();
 
@@ -87,6 +103,12 @@ class StockTransferService
 
     public function dispatch(StockTransfer $transfer, string $dispatchDate, ?int $userId): StockTransfer
     {
+        $validator = Validator::make(['dispatch_date' => $dispatchDate], ['dispatch_date' => ['required', 'date']]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $dispatchDate = $validator->validated()['dispatch_date'];
+
         return DB::transaction(function () use ($transfer, $dispatchDate, $userId): StockTransfer {
             $transfer = StockTransfer::query()->with('items.product')->lockForUpdate()->findOrFail($transfer->id);
 
@@ -142,6 +164,17 @@ class StockTransferService
     /** @param array<int, string> $receivedQuantities */
     public function receive(StockTransfer $transfer, string $receivedDate, array $receivedQuantities, ?int $userId): StockTransfer
     {
+        $validator = Validator::make(['received_date' => $receivedDate, 'quantities' => $receivedQuantities], [
+            'received_date' => ['required', 'date'],
+            'quantities' => ['required', 'array', 'min:1'],
+            'quantities.*' => ['required', 'decimal:0,6', 'gte:0'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $receivedDate = $validator->validated()['received_date'];
+        $receivedQuantities = $validator->validated()['quantities'];
+
         return DB::transaction(function () use ($transfer, $receivedDate, $receivedQuantities, $userId): StockTransfer {
             $transfer = StockTransfer::query()->with('items.product')->lockForUpdate()->findOrFail($transfer->id);
 

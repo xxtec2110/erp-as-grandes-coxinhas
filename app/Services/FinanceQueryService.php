@@ -25,6 +25,9 @@ class FinanceQueryService
             ->when($period === 'overdue', fn ($q) => $q->whereDate('due_date', '<', now())->whereNotIn('status', ['paid', 'cancelled']))
             ->when($period === 'today', fn ($q) => $q->whereDate('due_date', now()))
             ->when($period === 'week', fn ($q) => $q->whereBetween('due_date', [now()->startOfWeek(), now()->endOfWeek()]))
+            ->when(filled($filters['status'] ?? null), fn ($q) => $q->where('status', $filters['status']))
+            ->when(isset($filters['from']), fn ($q) => $q->whereDate('due_date', '>=', $filters['from']))
+            ->when(isset($filters['to']), fn ($q) => $q->whereDate('due_date', '<=', $filters['to']))
             ->when(isset($filters['supplier']), fn ($q) => $q->whereHas('supplier', fn ($s) => $s->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['supplier']).'%'])));
 
         return $query->orderBy('due_date')->get();
@@ -46,6 +49,13 @@ class FinanceQueryService
             $this->authorization->authorize($user, 'finance.payments.view', (int) $filters['location_id']);
         }
 
-        return Payment::query()->completed()->with(['payable.supplier', 'financialAccount'])->whereHas('payable', fn ($q) => $q->whereIn('location_id', $ids)->when(isset($filters['location_id']), fn ($payables) => $payables->where('location_id', $filters['location_id'])))->when(isset($filters['supplier']), fn ($q) => $q->whereHas('payable.supplier', fn ($s) => $s->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['supplier']).'%'])))->when(isset($filters['account']), fn ($q) => $q->whereHas('financialAccount', fn ($a) => $a->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['account']).'%'])))->when(isset($filters['payer']), fn ($q) => $q->whereRaw('LOWER(paid_by_name) LIKE ?', ['%'.mb_strtolower($filters['payer']).'%']))->get();
+        return Payment::query()->completed()->with(['payable.supplier', 'payable.location', 'financialAccount'])
+            ->whereHas('payable', fn ($q) => $q->whereIn('location_id', $ids)->when(isset($filters['location_id']), fn ($payables) => $payables->where('location_id', $filters['location_id'])))
+            ->when(isset($filters['supplier']), fn ($q) => $q->whereHas('payable.supplier', fn ($s) => $s->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['supplier']).'%'])))
+            ->when(isset($filters['account']), fn ($q) => $q->whereHas('financialAccount', fn ($a) => $a->whereRaw('LOWER(name) LIKE ?', ['%'.mb_strtolower($filters['account']).'%'])))
+            ->when(isset($filters['payer']), fn ($q) => $q->whereRaw('LOWER(paid_by_name) LIKE ?', ['%'.mb_strtolower($filters['payer']).'%']))
+            ->when(isset($filters['from']), fn ($q) => $q->whereDate('paid_at', '>=', $filters['from']))
+            ->when(isset($filters['to']), fn ($q) => $q->whereDate('paid_at', '<=', $filters['to']))
+            ->latest('paid_at')->limit(100)->get();
     }
 }

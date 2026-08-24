@@ -6,8 +6,10 @@ use App\Models\AgentAttachment;
 use App\Models\AgentConversation;
 use App\Models\AgentUsageCost;
 use App\Models\Location;
+use App\Models\Payable;
 use App\Models\PendingAgentAction;
 use App\Models\Product;
+use App\Models\PurchaseDocument;
 use App\Models\StockTransfer;
 use App\Models\Supplier;
 use App\Models\User;
@@ -19,9 +21,11 @@ use App\Services\AiInterpretationService;
 use App\Services\AuthorizationService;
 use App\Services\DashboardUserVisibilityService;
 use App\Services\RestrictedProductionInteractionService;
+use App\Services\StockBalanceService;
 use App\Services\UndoLastOperationService;
 use App\Services\WhatsAppIdentityResolver;
 use App\Support\DecimalFormatter;
+use Brick\Math\BigDecimal;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Str;
@@ -29,7 +33,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver, private StockBalanceService $stockBalances) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -103,8 +107,20 @@ class ErpAgentService
         }
 
         $text = trim($message->text ?? '');
+        $staleActions = $conversation->pendingActions()->where('status', 'pending')->whereNotNull('expires_at')->where('expires_at', '<=', now())->get(['id', 'tool_name']);
         $expired = $this->pending->expireStaleForConversation($conversation->id) > 0;
-        $active = $conversation->pendingActions()->where('status', 'pending')->latest()->first();
+        if ($expired) {
+            foreach ($staleActions as $staleAction) {
+                $this->events->record('pending_expired', $message->channel, $user, $conversation->id, $message->externalMessageId, $staleAction->tool_name, ['domain' => $this->domain($staleAction->tool_name)], status: 'expired');
+            }
+        }
+        $activeActions = $conversation->pendingActions()->where('status', 'pending')->latest()->get();
+        if ($activeActions->count() > 1) {
+            $this->events->record('pending_ambiguous', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'rejected', errorCode: 'multiple_pending_actions');
+
+            return ErpAgentResponse::error('Há mais de uma ação pendente. Abra o painel do Agente e selecione explicitamente qual deseja revisar.', 'multiple_pending_actions');
+        }
+        $active = $activeActions->first();
         if ($active !== null) {
             return $this->continuePending($active, $text, $user, $message);
         }
@@ -220,6 +236,7 @@ class ErpAgentService
             unset($input['_ai_missing_fields']);
             $missing = array_values(array_unique([...$this->missing($name, $input), ...$aiMissing]));
             $action = $this->pending->prepare($user, $name, $input, $missing, $sourceKey.':action', $conversation->id);
+            $this->events->record('pending_created', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['domain' => $this->domain($name), 'missing_count' => count($missing)], status: 'pending');
             if ($this->catalogWorkflow->supports($name)) {
                 return $this->catalogWorkflow->question($action);
             }
@@ -250,13 +267,18 @@ class ErpAgentService
 
             return $this->confirmation($action);
         }
-        $result = $this->executor->execute($name, $input, $user);
+        try {
+            $result = $this->executor->execute($name, $input, $user);
+        } catch (Throwable $exception) {
+            $this->events->record('tool_failed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['domain' => $this->domain($name)], status: 'failed', errorCode: class_basename($exception));
+            throw $exception;
+        }
         $conversation->update(['context' => array_filter([
             ...($conversation->context ?? []),
             'location_id' => $input['location_id'] ?? ($conversation->context['location_id'] ?? null),
             'last_tool' => $name,
         ], fn (mixed $value): bool => $value !== null)]);
-        $this->events->record('tool_executed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['location_id' => $input['location_id'] ?? null, 'result' => 'success'], status: 'success');
+        $this->events->record('tool_executed', $message->channel, $user, $conversation->id, $message->externalMessageId, $name, ['location_id' => $input['location_id'] ?? null, 'result' => 'success', 'domain' => $this->domain($name)], status: 'success');
 
         return $this->format($name, $result, $input);
     }
@@ -277,13 +299,18 @@ class ErpAgentService
         }
         if ((empty($action->missing_fields) && $answer === '2') || in_array($answer, ['NÃO', 'NAO', 'CANCELAR'], true)) {
             $this->pending->cancel($action, $user);
-            $this->events->record('confirmation_cancelled', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name);
+            $this->events->record('confirmation_cancelled', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name, ['domain' => $this->domain($action->tool_name)], status: 'cancelled');
 
             return new ErpAgentResponse(true, 'Operação cancelada.');
         }
         if (empty($action->missing_fields) && in_array($answer, ['1', 'SIM', 'OK', 'CONFIRMAR', 'PODE CRIAR'], true)) {
-            $executed = $this->pending->confirm($action, $user, $this->executor);
-            $this->events->record('confirmation_executed', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name);
+            try {
+                $executed = $this->pending->confirm($action, $user, $this->executor);
+            } catch (Throwable $exception) {
+                $this->events->record('tool_failed', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name, ['domain' => $this->domain($action->tool_name)], status: 'failed', errorCode: class_basename($exception));
+                throw $exception;
+            }
+            $this->events->record('confirmation_executed', $message->channel, $user, $action->agent_conversation_id, $message->externalMessageId, $action->tool_name, ['domain' => $this->domain($action->tool_name)], status: 'success');
 
             return new ErpAgentResponse(true, 'Operação confirmada e registrada com sucesso.', data: $executed->result ?? []);
         }
@@ -327,6 +354,22 @@ class ErpAgentService
         }
         if (in_array('product_id', $action->missing_fields ?? [], true)) {
             $payload = $action->payload;
+            if (isset($payload['_product_match'])) {
+                $candidates = collect($payload['_product_match']['candidates'] ?? []);
+                $choice = ctype_digit(trim($text)) ? (int) trim($text) : null;
+                $selected = $choice !== null && $choice >= 1 && $choice <= $candidates->count()
+                    ? $candidates->values()->get($choice - 1)
+                    : $candidates->first(fn ($candidate) => mb_strtolower($candidate['name']) === mb_strtolower(trim($text)));
+                if ($selected === null) {
+                    return $this->productQuestion($action);
+                }
+                unset($payload['_product_match']);
+                $payload['product_id'] = $selected['id'];
+                $missing = $this->missing($action->tool_name, $payload);
+                $action->update(['payload' => $payload, 'missing_fields' => $missing]);
+
+                return $missing === [] ? $this->confirmation($action->refresh()) : new ErpAgentResponse(true, 'Preciso informar: '.implode(', ', $missing).'.', pendingAction: ['id' => $action->id]);
+            }
             $index = collect($payload['items'] ?? [])->search(fn ($item) => ! isset($item['product_id']));
             if ($index === false) {
                 return ErpAgentResponse::error('Nenhum produto pendente foi encontrado.', 'pending_product_not_found');
@@ -429,12 +472,15 @@ class ErpAgentService
 
         $message = match ($action->tool_name) {
             'finance.payables.create' => $this->templates->payablePreview($action->payload),
+            'finance.payments.record' => $this->paymentPreview($action->payload),
             'agent.operations.undo' => "⚠️ CANCELAR OPERAÇÃO\n\n{$action->payload['operation_type']} #{$action->payload['operation_id']}\n\nDeseja realmente cancelar?",
             'production.orders.plan', 'production.orders.complete_batch' => $this->productionOrderPreview($action),
             'purchases.documents.create' => $this->purchasePreview($action),
+            'purchases.receipts.receive' => $this->purchaseReceiptPreview($action->payload),
             'dashboard.user_widgets.update', 'dashboard.user_widgets.reset' => $this->dashboardVisibility->preview($action->tool_name, $action->payload),
             'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.locations.replace' => $this->accessManagement->preview($action->tool_name, $action->payload),
-            'transfers.complete' => $this->transferPreview($action->payload),
+            'losses.record' => $this->lossPreview($action->payload),
+            'transfers.create', 'transfers.complete', 'transfers.dispatch', 'transfers.receive' => $this->transferPreview($action->tool_name, $action->payload),
             'stock.opening_balance.record' => $this->openingStockPreview($action->payload),
             default => 'Revise os dados e confirme a operação. Confirmar?',
         };
@@ -445,11 +491,11 @@ class ErpAgentService
     private function productQuestion(PendingAgentAction $action): ErpAgentResponse
     {
         $item = collect($action->payload['items'] ?? [])->first(fn ($item) => ! isset($item['product_id']));
-        $candidates = collect(data_get($item, '_product_match.candidates', []));
+        $candidates = collect(data_get($item, '_product_match.candidates', data_get($action->payload, '_product_match.candidates', [])));
         if ($candidates->isEmpty()) {
             return new ErpAgentResponse(true, 'Não encontrei esse produto cadastrado. Informe o nome exato pela interface administrativa.', pendingAction: ['id' => $action->id]);
         }
-        $lines = ['Encontrei mais de uma possibilidade para "'.($item['product_name'] ?? 'produto').'":', ''];
+        $lines = ['Encontrei mais de uma possibilidade para "'.($item['product_name'] ?? $action->payload['product_name'] ?? 'produto').'":', ''];
         foreach ($candidates->values() as $index => $candidate) {
             $lines[] = ($index + 1).'. '.$candidate['name'];
         }
@@ -484,7 +530,7 @@ class ErpAgentService
             'Documento: '.($payload['document_number'] ?? 'Sem número'),
             'Data: '.($payload['issue_date'] ?? 'Não informada'),
             'Total: R$ '.DecimalFormatter::format((string) ($payload['total_amount'] ?? '0'), 2),
-            'Recebimento físico: '.(($payload['received'] ?? false) ? 'Sim' : 'Não'),
+            'Estoque: não será movimentado por este lançamento',
             '',
         ];
         foreach ($payload['items'] ?? [] as $item) {
@@ -593,18 +639,28 @@ class ErpAgentService
             'pdv.health' => new ErpAgentResponse(true, $this->templates->pdvHealth($result), data: $result),
             'pdv.reconciliation' => new ErpAgentResponse(true, $this->templates->pdvReconciliation($result), data: $result),
             'products.prices.query' => new ErpAgentResponse(true, $this->templates->catalogPrices($result), data: $result),
+            'products.catalog.query' => new ErpAgentResponse(true, $this->templates->catalogProducts($result), data: $result),
+            'ingredients.catalog.query' => new ErpAgentResponse(true, $this->templates->catalogIngredients($result), data: $result),
+            'suppliers.catalog.query' => new ErpAgentResponse(true, $this->templates->suppliers($result), data: $result),
             'stock.positions.list' => new ErpAgentResponse(true, $this->templates->stock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'ingredient_stock.positions.list' => new ErpAgentResponse(true, $this->templates->ingredientStock($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'ingredient_stock.shortages.list' => new ErpAgentResponse(true, $this->templates->ingredientShortages($result, Location::query()->findOrFail($input['location_id'])->name), data: ['items' => $result]),
             'production.today' => new ErpAgentResponse(true, $this->templates->productions($result, Location::query()->findOrFail($input['location_id'])->name, $input['date'] ?? now()->toDateString()), data: ['count' => $result->count()]),
+            'production.orders.query' => new ErpAgentResponse(true, $this->templates->productionOrders($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),
             'production.suggestions.list' => new ErpAgentResponse(true, $this->templates->productionSuggestions($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => count($result)]),
             'transfers.list' => new ErpAgentResponse(true, $this->templates->transfers($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),
+            'losses.query' => new ErpAgentResponse(true, $this->templates->losses($result, Location::query()->findOrFail($input['location_id'])->name), data: ['count' => $result->count()]),
             'reports.operational.summary' => new ErpAgentResponse(true, $this->templates->operational($result, Location::query()->findOrFail($input['location_id'])->name), data: $result),
             'finance.payables.list' => new ErpAgentResponse(true, $this->templates->payables($result), data: ['count' => $result->count()]),
+            'finance.payables.get' => new ErpAgentResponse(true, $this->templates->payable($result), data: ['id' => $result->id]),
+            'finance.payments.list' => new ErpAgentResponse(true, $this->templates->payments($result), data: ['count' => $result->count()]),
+            'finance.accounts.list' => new ErpAgentResponse(true, $this->templates->financialAccounts($result), data: ['count' => $result->count()]),
             'finance.reports.summary' => new ErpAgentResponse(true, $this->templates->finance($result), data: $result),
             'purchases.documents.list' => new ErpAgentResponse(true, $this->templates->purchases($result), data: ['count' => $result->count()]),
             'purchases.documents.get' => new ErpAgentResponse(true, $this->templates->purchase($result), data: ['id' => $result->id]),
             'purchases.items.list' => new ErpAgentResponse(true, $this->templates->purchaseItems($result), data: ['count' => $result->count()]),
+            'purchases.history' => new ErpAgentResponse(true, $this->templates->purchases($result), data: ['count' => $result->count()]),
+            'purchases.summary' => new ErpAgentResponse(true, $this->templates->purchaseSummary($result), data: $result),
             'dashboard.user_widgets.list' => new ErpAgentResponse(true, $this->dashboardVisibility->describe($result), data: $result),
             'agent.access.locations.list' => new ErpAgentResponse(true, 'Unidades de '.$result['target_user_name'].': '.(collect($result['locations'])->pluck('name')->implode(', ') ?: 'nenhuma unidade').'.', data: $result),
             default => new ErpAgentResponse(true, 'Consulta concluída.'),
@@ -678,13 +734,73 @@ class ErpAgentService
     }
 
     /** @param array<string, mixed> $payload */
-    private function transferPreview(array $payload): string
+    private function paymentPreview(array $payload): string
     {
+        $payable = Payable::query()->with('supplier')->findOrFail($payload['payable_id']);
+        $remaining = BigDecimal::of($payable->expected_amount)->minus($payable->paidAmount());
+        $after = $remaining->minus((string) $payload['amount']);
+
+        return "PAGAMENTO\n\nConta: {$payable->description}\nFornecedor: ".($payable->supplier?->name ?? 'Não informado')."\nValor: R$ ".DecimalFormatter::format((string) $payload['amount'], 2)."\nSaldo atual: R$ ".DecimalFormatter::format((string) $remaining, 2)."\nSaldo após confirmação: R$ ".DecimalFormatter::format((string) $after, 2)."\nData real: {$payload['paid_at']}\nMétodo: {$payload['payment_method']}\n\nConfirmar?";
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function purchaseReceiptPreview(array $payload): string
+    {
+        $document = PurchaseDocument::query()->with(['supplier', 'location', 'items'])->findOrFail($payload['document_id']);
+        $lines = ['RECEBIMENTO DE COMPRA', '', 'Documento: #'.$document->id.' '.($document->document_number ?? ''), 'Fornecedor: '.($document->supplier?->name ?? 'Não informado'), 'Unidade: '.$document->location->name, 'Data real: '.$payload['received_date'], ''];
+        foreach ($payload['items'] as $row) {
+            $item = $document->items->firstWhere('id', (int) ($row['item_id'] ?? 0));
+            $lines[] = ($item?->description ?? 'Item inválido').': '.($row['quantity'] ?? '?').' '.($item?->unit ?? '');
+        }
+        $lines[] = '';
+        $lines[] = 'O estoque de insumos será movimentado somente após esta confirmação.';
+        $lines[] = 'Confirmar?';
+
+        return implode("\n", $lines);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function lossPreview(array $payload): string
+    {
+        $location = Location::query()->findOrFail($payload['location_id']);
+        $product = Product::query()->findOrFail($payload['product_id']);
+        $before = BigDecimal::of($this->stockBalances->balance($product->id, $location->id));
+        $after = $before->minus((string) $payload['quantity']);
+
+        return "PERDA DE PRODUTO\n\nProduto: {$product->name}\nUnidade: {$location->name}\nQuantidade: {$payload['quantity']} {$product->stock_unit}\nSaldo atual: {$before} {$product->stock_unit}\nSaldo após confirmação: {$after} {$product->stock_unit}\nData real: {$payload['operation_date']}\n\nO saldo será revalidado antes da gravação. Confirmar?";
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function transferPreview(string $tool, array $payload): string
+    {
+        if (isset($payload['transfer_id'])) {
+            $transfer = StockTransfer::query()->with(['sourceLocation', 'destinationLocation', 'items.product'])->findOrFail($payload['transfer_id']);
+            $lines = [$tool === 'transfers.dispatch' ? 'EXPEDIÇÃO DE TRANSFERÊNCIA' : 'RECEBIMENTO DE TRANSFERÊNCIA', '', 'Transferência: #'.$transfer->id, 'Origem: '.$transfer->sourceLocation->name, 'Destino: '.$transfer->destinationLocation->name, ''];
+            foreach ($transfer->items as $item) {
+                $quantity = $tool === 'transfers.receive' ? ($payload['quantity_received'] ?? '?') : $item->quantity_sent;
+                $lines[] = $item->product->name.': '.$quantity.' '.$item->product->stock_unit;
+            }
+            $lines[] = '';
+            $lines[] = $tool === 'transfers.dispatch'
+                ? 'A saída da origem ocorrerá após confirmação; o destino ainda não será incrementado.'
+                : 'A entrada no destino ocorrerá após confirmação; a saída da origem não será repetida.';
+            $lines[] = 'Confirmar?';
+
+            return implode("\n", $lines);
+        }
+
         $source = Location::query()->find($payload['source_location_id'])?->name ?? 'Não informada';
         $destination = Location::query()->find($payload['destination_location_id'])?->name ?? 'Não informada';
-        $product = Product::query()->find($payload['product_id'])?->name ?? 'Não informado';
+        $product = Product::query()->find($payload['product_id']);
+        $sourceBefore = BigDecimal::of($this->stockBalances->balance((int) $payload['product_id'], (int) $payload['source_location_id']));
+        $destinationBefore = BigDecimal::of($this->stockBalances->balance((int) $payload['product_id'], (int) $payload['destination_location_id']));
+        $lines = ['TRANSFERÊNCIA DE ESTOQUE', '', 'Origem: '.$source, 'Destino: '.$destination, 'Produto: '.($product?->name ?? 'Não informado'), 'Quantidade: '.$payload['quantity'].' '.($product?->stock_unit ?? ''), 'Saldo atual na origem: '.$sourceBefore, 'Saldo atual no destino: '.$destinationBefore, ''];
+        $lines[] = $tool === 'transfers.create'
+            ? 'A confirmação criará a transferência pendente. Nenhum saldo será movimentado até a expedição.'
+            : 'A confirmação executará saída e recebimento oficiais de forma idempotente.';
+        $lines[] = 'Confirmar?';
 
-        return "TRANSFERÊNCIA DE ESTOQUE\n\nOrigem:\n{$source}\n\nDestino:\n{$destination}\n\nProduto:\n{$product}\n\nQuantidade:\n{$payload['quantity']}\n\nApós confirmação:\n{$source}: -{$payload['quantity']}\n{$destination}: +{$payload['quantity']}\n\nConfirmar?";
+        return implode("\n", $lines);
     }
 
     /** @param array<string, mixed> $payload */
@@ -712,7 +828,19 @@ class ErpAgentService
             'catalog.preparations.update' => ['preparation_id'],
             'catalog.product_recipes.create', 'catalog.product_recipes.update' => ['product_id', 'yield_quantity', 'technical_loss_percentage', 'packaging_cost'],
             'stock.opening_balance.record' => ['product_id', 'location_id', 'quantity', 'operation_date', 'notes'],
-            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'], 'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'], 'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'], 'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'], 'production.complete' => ['production_id', 'actual_quantity'], 'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'], 'transfers.create', 'transfers.complete' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'], 'transfers.dispatch' => ['transfer_id', 'dispatch_date'], 'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'], 'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.default_location.set', 'agent.access.locations.replace' => ['target_user_id', 'location_id'], 'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items', 'received'], default => []
+            'production.orders.plan', 'production.orders.complete_batch' => ['location_id', 'production_date', 'items'],
+            'finance.payables.create' => ['description', 'location_id', 'expected_amount', 'competency_date', 'due_date'],
+            'finance.payments.record' => ['payable_id', 'amount', 'paid_at', 'financial_account_id', 'payment_method'],
+            'production.plan' => ['product_id', 'location_id', 'planned_quantity', 'operation_date'],
+            'production.complete' => ['production_id', 'actual_quantity'],
+            'losses.record' => ['product_id', 'location_id', 'loss_reason_id', 'quantity', 'operation_date'],
+            'transfers.create', 'transfers.complete' => ['source_location_id', 'destination_location_id', 'product_id', 'quantity', 'operation_date'],
+            'transfers.dispatch' => ['transfer_id', 'dispatch_date'],
+            'transfers.receive' => ['transfer_id', 'received_date', 'quantity_received'],
+            'agent.access.location.grant', 'agent.access.location.revoke', 'agent.access.default_location.set', 'agent.access.locations.replace' => ['target_user_id', 'location_id'],
+            'purchases.documents.create' => ['document_type', 'issue_date', 'total_amount', 'location_id', 'supplier_id', 'items'],
+            'purchases.receipts.receive' => ['document_id', 'received_date', 'items'],
+            default => []
         };
 
         return array_values(array_filter($required, fn ($key) => ! isset($input[$key]) || $input[$key] === ''));
@@ -735,6 +863,21 @@ class ErpAgentService
         }
 
         return $message->externalMessageId;
+    }
+
+    private function domain(string $tool): string
+    {
+        return match (true) {
+            str_starts_with($tool, 'catalog.products'), str_starts_with($tool, 'products.') => 'products',
+            str_starts_with($tool, 'catalog.ingredients'), str_starts_with($tool, 'ingredients.'), str_starts_with($tool, 'costs.ingredients') => 'ingredients',
+            str_starts_with($tool, 'catalog.suppliers'), str_starts_with($tool, 'suppliers.') => 'suppliers',
+            str_starts_with($tool, 'purchases.') => 'purchases',
+            str_starts_with($tool, 'finance.') => 'finance',
+            str_starts_with($tool, 'production.') => 'production',
+            str_starts_with($tool, 'losses.') => 'losses',
+            str_starts_with($tool, 'transfers.') => 'transfers',
+            default => 'erp',
+        };
     }
 
     /** @param array<int, string> $permissions */

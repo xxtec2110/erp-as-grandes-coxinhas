@@ -10,6 +10,8 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class ProductLossService
 {
@@ -21,6 +23,20 @@ class ProductLossService
     /** @param array<string, mixed> $data */
     public function record(array $data, ?int $userId): ProductLoss
     {
+        $validator = Validator::make($data, [
+            'product_id' => ['required', Rule::exists('products', 'id')->where('active', true)],
+            'location_id' => ['required', Rule::exists('locations', 'id')->where('active', true)],
+            'loss_reason_id' => ['required', Rule::exists('loss_reasons', 'id')->where('active', true)],
+            'quantity' => ['required', 'decimal:0,6', 'gt:0'],
+            'operation_date' => ['required', 'date'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $data = $validator->validated();
+
         return DB::transaction(function () use ($data, $userId): ProductLoss {
             $quantity = BigDecimal::of($data['quantity'])->toScale(6, RoundingMode::Unnecessary);
             $existing = ProductLoss::query()->where('idempotency_key', $data['idempotency_key'])->first();

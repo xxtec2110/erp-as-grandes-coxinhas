@@ -49,6 +49,35 @@ class FakeAiProvider implements AiProviderInterface
             $arguments['location_name'] = $location;
         }
 
+        if (str_contains($normalized, 'produtos') && (str_contains($normalized, 'catalogo') || str_contains($normalized, 'sem ficha') || str_contains($normalized, 'sem preco'))) {
+            return ['tool' => 'products.catalog.query', 'arguments' => [
+                'without_recipe' => str_contains($normalized, 'sem ficha'),
+                'without_price' => str_contains($normalized, 'sem preco'),
+                'limit' => 30,
+            ]];
+        }
+        if (str_contains($normalized, 'insumos') && (str_contains($normalized, 'catalogo') || str_contains($normalized, 'cadastrad') || str_contains($normalized, 'sem preco'))) {
+            return ['tool' => 'ingredients.catalog.query', 'arguments' => [
+                'without_price' => str_contains($normalized, 'sem preco'),
+                'limit' => 30,
+            ]];
+        }
+        if (str_contains($normalized, 'fornecedores') && (str_contains($normalized, 'liste') || str_contains($normalized, 'cadastrad'))) {
+            return ['tool' => 'suppliers.catalog.query', 'arguments' => ['limit' => 30]];
+        }
+        if (str_contains($normalized, 'resumo') && str_contains($normalized, 'compras')) {
+            return ['tool' => 'purchases.summary', 'arguments' => $arguments];
+        }
+        if (str_contains($normalized, 'ordens de producao')) {
+            return ['tool' => 'production.orders.query', 'arguments' => $arguments];
+        }
+        if (str_contains($normalized, 'perdas') && (str_contains($normalized, 'liste') || str_contains($normalized, 'quais') || str_contains($normalized, 'registrad'))) {
+            return ['tool' => 'losses.query', 'arguments' => $arguments];
+        }
+        if (str_contains($normalized, 'pagamentos') && str_contains($normalized, 'registrad')) {
+            return ['tool' => 'finance.payments.list', 'arguments' => collect($arguments)->except('period')->all()];
+        }
+
         if (str_contains($normalized, 'grandchef') && (str_contains($normalized, 'diferenca') || str_contains($normalized, 'nao foram importad'))) {
             return ['tool' => 'pdv.reconciliation', 'arguments' => $arguments];
         }

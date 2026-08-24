@@ -6,13 +6,17 @@ use App\Agent\AgentMessage;
 use App\Agent\AiInterpretation;
 use App\Agent\AiProviderInterface;
 use App\Models\AgentAttachment;
+use App\Models\FinancialAccount;
+use App\Models\LossReason;
+use App\Models\Payable;
+use App\Models\PurchaseDocument;
 use App\Models\User;
 use DomainException;
 use Illuminate\Support\Facades\Storage;
 
 class AiInterpretationService
 {
-    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients, private ProductMatchService $products) {}
+    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients, private IngredientSemanticResolver $ingredientResolver, private ProductMatchService $products) {}
 
     public function interpret(AgentMessage $message, array $availableTools, User $user, array $conversationContext = []): ?AiInterpretation
     {
@@ -49,6 +53,7 @@ class AiInterpretationService
         $result = $this->matchSupplier($result);
         $result = $this->matchIngredients($result);
         $result = $this->matchProducts($result);
+        $result = $this->matchSingularEntities($result);
         if ($cacheKey !== null) {
             $this->cache($authorized[0], $cacheKey, $result);
         }
@@ -89,7 +94,7 @@ class AiInterpretationService
         $missing = $result->missingFields;
         if (in_array($match['status'], ['fiscal_exact', 'name_exact'], true)) {
             $fields['supplier_id'] = $match['supplier_id'];
-        } else {
+        } elseif (in_array($result->tool, ['purchases.documents.create', 'catalog.suppliers.update', 'catalog.ingredient_prices.add'], true)) {
             $fields['_supplier_match'] = ['status' => $match['status'], 'candidates' => $match['candidates']];
             $missing[] = 'supplier_id';
         }
@@ -126,6 +131,84 @@ class AiInterpretationService
         $missing = $result->missingFields;
         if (collect($fields['items'])->contains(fn ($item) => ! isset($item['product_id']))) {
             $missing[] = 'product_id';
+        }
+
+        return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, array_values(array_unique($missing)), $result->sourceType, $result->documentType, $result->summary, $result->usage);
+    }
+
+    private function matchSingularEntities(AiInterpretation $result): AiInterpretation
+    {
+        $fields = $result->fields;
+        $missing = $result->missingFields;
+        $tool = (string) $result->tool;
+
+        if (! isset($fields['product_id']) && is_string($fields['product_name'] ?? null) && in_array($tool, [
+            'catalog.products.update', 'catalog.products.update_price', 'catalog.product_aliases.create',
+            'production.plan', 'losses.record', 'losses.query', 'transfers.create', 'transfers.complete',
+        ], true)) {
+            $matched = $this->products->resolveExactItems([['product_name' => $fields['product_name']]])[0];
+            if (isset($matched['product_id'])) {
+                $fields['product_id'] = $matched['product_id'];
+            } else {
+                $fields['_product_match'] = $this->products->matchItems([['product_name' => $fields['product_name']]])[0]['_product_match'] ?? ['status' => 'not_found', 'candidates' => []];
+                $missing[] = 'product_id';
+            }
+        }
+
+        if (! isset($fields['ingredient_id']) && is_string($fields['ingredient_name'] ?? null) && in_array($tool, [
+            'catalog.ingredients.update', 'catalog.ingredient_prices.add', 'costs.ingredients.current',
+            'costs.ingredients.history', 'costs.ingredients.compare_suppliers',
+        ], true)) {
+            $matched = $this->ingredientResolver->resolve($fields['ingredient_name']);
+            if ($matched['status'] === 'resolved') {
+                $fields['ingredient_id'] = $matched['ingredient_id'];
+            } else {
+                $fields['_ingredient_match'] = ['status' => $matched['status'], 'candidates' => $matched['candidates'] ?? []];
+                $missing[] = 'ingredient_id';
+            }
+        }
+
+        if ($tool === 'purchases.receipts.receive' && ! isset($fields['document_id']) && filled($fields['document_number'] ?? null)) {
+            $matches = PurchaseDocument::query()->where('document_number', trim((string) $fields['document_number']))->get();
+            if ($matches->count() === 1) {
+                $fields['document_id'] = $matches->sole()->id;
+            } else {
+                $fields['_document_match'] = ['status' => $matches->isEmpty() ? 'not_found' : 'ambiguous', 'candidates' => $matches->take(5)->pluck('id')->all()];
+                $missing[] = 'document_id';
+            }
+        }
+
+        if ($tool === 'finance.payments.record' && ! isset($fields['payable_id']) && filled($fields['payable_description'] ?? null)) {
+            $name = mb_strtolower(trim((string) $fields['payable_description']));
+            $matches = Payable::query()->whereNotIn('status', ['paid', 'cancelled'])->get()->filter(fn (Payable $payable) => mb_strtolower(trim($payable->description)) === $name);
+            if ($matches->count() === 1) {
+                $fields['payable_id'] = $matches->first()->id;
+            } else {
+                $fields['_payable_match'] = ['status' => $matches->isEmpty() ? 'not_found' : 'ambiguous', 'candidates' => $matches->take(5)->pluck('id')->all()];
+                $missing[] = 'payable_id';
+            }
+        }
+
+        if ($tool === 'finance.payments.record' && ! isset($fields['financial_account_id']) && filled($fields['financial_account_name'] ?? null)) {
+            $name = mb_strtolower(trim((string) $fields['financial_account_name']));
+            $matches = FinancialAccount::query()->where('active', true)->get()->filter(fn (FinancialAccount $account) => mb_strtolower(trim($account->name)) === $name);
+            if ($matches->count() === 1) {
+                $fields['financial_account_id'] = $matches->first()->id;
+            } else {
+                $fields['_financial_account_match'] = ['status' => $matches->isEmpty() ? 'not_found' : 'ambiguous', 'candidates' => $matches->take(5)->pluck('id')->all()];
+                $missing[] = 'financial_account_id';
+            }
+        }
+
+        if ($tool === 'losses.record' && ! isset($fields['loss_reason_id']) && filled($fields['loss_reason_name'] ?? null)) {
+            $name = mb_strtolower(trim((string) $fields['loss_reason_name']));
+            $matches = LossReason::query()->where('active', true)->get()->filter(fn (LossReason $reason) => mb_strtolower(trim($reason->name)) === $name);
+            if ($matches->count() === 1) {
+                $fields['loss_reason_id'] = $matches->first()->id;
+            } else {
+                $fields['_loss_reason_match'] = ['status' => $matches->isEmpty() ? 'not_found' : 'ambiguous', 'candidates' => $matches->take(5)->pluck('id')->all()];
+                $missing[] = 'loss_reason_id';
+            }
         }
 
         return new AiInterpretation($result->intent, $result->tool, $result->confidence, $fields, array_values(array_unique($missing)), $result->sourceType, $result->documentType, $result->summary, $result->usage);

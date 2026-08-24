@@ -37,7 +37,7 @@ class DeterministicCommandParser
         if (preg_match('/^(?:ENVIE|ENVIEI|TRANSFIRA)\s+([0-9]+(?:[.,][0-9]+)?)\s+(.+?)\s+DA\s+(.+?)\s+PARA\s+(.+?)[.!]?$/ui', $plain, $matches) === 1) {
             $item = $this->products->resolveExactItems([['product_name' => trim($matches[2])]])[0];
             if (isset($item['product_id'])) {
-                return ['tool' => 'transfers.complete', 'arguments' => [
+                return ['tool' => 'transfers.create', 'arguments' => [
                     'quantity' => str_replace(',', '.', $matches[1]),
                     'product_id' => $item['product_id'],
                     'source_location_name' => trim($matches[3]),

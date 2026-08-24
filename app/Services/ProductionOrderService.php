@@ -16,6 +16,8 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class ProductionOrderService
 {
@@ -23,6 +25,19 @@ class ProductionOrderService
 
     public function plan(array $data, User $user, string $source = 'web'): ProductionOrder
     {
+        $validator = Validator::make($data, [
+            'location_id' => ['required', Rule::exists('locations', 'id')->where('active', true)],
+            'production_date' => ['required', 'date'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'distinct', Rule::exists('products', 'id')->where('active', true)],
+            'items.*.planned_quantity' => ['required', 'decimal:0,6', 'gt:0'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $data = $validator->validated();
         $this->authorization->authorize($user, 'production.orders.create', (int) $data['location_id']);
 
         return DB::transaction(function () use ($data, $user, $source) {
@@ -48,6 +63,20 @@ class ProductionOrderService
 
     public function planAndComplete(array $data, User $user, string $source = 'agent'): ProductionOrder
     {
+        $validator = Validator::make($data, [
+            'location_id' => ['required', Rule::exists('locations', 'id')->where('active', true)],
+            'production_date' => ['required', 'date'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.product_id' => ['required', 'distinct', Rule::exists('products', 'id')->where('active', true)],
+            'items.*.produced_quantity' => ['required', 'decimal:0,6', 'gt:0'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $data = $validator->validated();
+
         return DB::transaction(function () use ($data, $user, $source) {
             $planItems = array_map(fn ($item) => ['product_id' => $item['product_id'], 'planned_quantity' => $item['produced_quantity']], $data['items']);
             $order = $this->plan([...$data, 'items' => $planItems], $user, $source);
@@ -62,6 +91,11 @@ class ProductionOrderService
 
     public function complete(ProductionOrder $order, array $quantities, User $user, string $source = 'web'): ProductionOrder
     {
+        $validator = Validator::make(['quantities' => $quantities], ['quantities' => ['required', 'array'], 'quantities.*' => ['nullable', 'decimal:0,6', 'gt:0']]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $quantities = $validator->validated()['quantities'];
         $this->authorization->authorize($user, 'production.orders.complete', $order->location_id);
 
         return DB::transaction(function () use ($order, $quantities, $user, $source) {

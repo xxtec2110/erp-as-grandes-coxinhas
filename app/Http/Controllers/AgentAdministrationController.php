@@ -114,7 +114,19 @@ class AgentAdministrationController extends Controller
             ? 'simulação local'
             : ($provider === 'openai' && config('ai.openai.enabled') && filled(config('ai.openai.api_key')) && $model !== '' ? 'configurado' : 'não configurado');
 
-        return view('agent.observability.index', ['metrics' => $metrics, 'providerConfig' => ['provider' => $provider, 'model' => $model, 'status' => $providerStatus], 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'usageCosts' => AgentUsageCost::query()->with(['user'])->latest()->limit(30)->get(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
+        $domainMetrics = AgentEvent::query()->where('created_at', '>=', $month)->whereNotNull('tool_name')->get()
+            ->groupBy(fn (AgentEvent $event) => $event->metadata['domain'] ?? explode('.', $event->tool_name)[0])
+            ->map(fn ($events, string $domain) => [
+                'domain' => $domain,
+                'reads' => $events->where('event_type', 'tool_executed')->count(),
+                'pending' => $events->where('event_type', 'pending_created')->count(),
+                'confirmed' => $events->where('event_type', 'confirmation_executed')->count(),
+                'rejected' => $events->whereIn('event_type', ['confirmation_cancelled', 'pending_ambiguous'])->count(),
+                'expired' => $events->where('event_type', 'pending_expired')->count(),
+                'failed' => $events->whereIn('event_type', ['tool_failed', 'tool_validation_failed', 'internal_error'])->count(),
+            ])->sortKeys();
+
+        return view('agent.observability.index', ['metrics' => $metrics, 'domainMetrics' => $domainMetrics, 'providerConfig' => ['provider' => $provider, 'model' => $model, 'status' => $providerStatus], 'costSummary' => $costs->summary(), 'costByUser' => $costs->byUser(), 'costSettings' => $costs->settings(), 'usageCosts' => AgentUsageCost::query()->with(['user'])->latest()->limit(30)->get(), 'events' => AgentEvent::query()->with(['user', 'identity', 'conversation'])->latest()->paginate(30), 'pendingActions' => PendingAgentAction::query()->with('conversation.user')->latest()->limit(20)->get(), 'whatsappMessages' => WhatsAppInboundMessage::query()->latest()->limit(30)->get()]);
     }
 
     public function updateCosts(Request $request, AgentCostService $costs): RedirectResponse

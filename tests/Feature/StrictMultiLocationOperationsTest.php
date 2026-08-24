@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Agent\AgentMessage;
+use App\Agent\AgentToolExecutor;
 use App\Agent\DeterministicCommandParser;
 use App\Agent\ErpAgentService;
 use App\Data\Stock\RecordStockMovementData;
@@ -18,6 +19,7 @@ use App\Models\ProductSale;
 use App\Models\PurchaseDocument;
 use App\Models\Role;
 use App\Models\StockMovement;
+use App\Models\StockTransfer;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Services\CreatePayableService;
@@ -183,7 +185,7 @@ class StrictMultiLocationOperationsTest extends TestCase
         $this->actingAs($master)->get(route('dashboard', ['location_id' => $factory->id]))->assertForbidden();
     }
 
-    public function test_agent_uses_deterministic_location_access_and_atomic_transfer_flows(): void
+    public function test_agent_uses_deterministic_location_access_and_staged_transfer_flows(): void
     {
         [$catanduva, $ibira, $factory] = $this->locations();
         $master = User::factory()->create(['name' => 'Admin Master', 'is_super_admin' => true, 'default_location_id' => $catanduva->id]);
@@ -199,7 +201,7 @@ class StrictMultiLocationOperationsTest extends TestCase
         $this->assertSame('agent.access.location.revoke', $parser->parse('Retire Ibirá do Guilherme.')['tool']);
         $this->assertSame('agent.access.locations.replace', $parser->parse('Deixe o Guilherme somente em Catanduva.')['tool']);
         $this->assertSame('agent.access.locations.list', $parser->parse('Quais unidades o Guilherme pode acessar?')['tool']);
-        $this->assertSame('transfers.complete', $parser->parse('Envie 80 Frango com Catupiry da fábrica para Ibirá.')['tool']);
+        $this->assertSame('transfers.create', $parser->parse('Envie 80 Frango com Catupiry da fábrica para Ibirá.')['tool']);
 
         $agent = app(ErpAgentService::class);
         $this->assertTrue($agent->handle($this->message('use-ibira', 'Use Ibirá.'))->success);
@@ -217,10 +219,16 @@ class StrictMultiLocationOperationsTest extends TestCase
         $this->assertEquals([$catanduva->id], $target->fresh()->locations()->pluck('locations.id')->all());
 
         $transfer = $agent->handle($this->message('transfer-ibira', 'Envie 80 Frango com Catupiry da fábrica para Ibirá.'));
-        $this->assertStringContainsString('Fábrica Central: -80', $transfer->message);
+        $this->assertStringContainsString('Nenhum saldo será movimentado', $transfer->message);
         $agent->handle($this->message('transfer-confirm', 'SIM'));
         $balances = app(StockBalanceService::class);
+        $this->assertSame('300.000000', $balances->balance($product, $factory));
+        $this->assertSame('0.000000', $balances->balance($product, $ibira));
+        $created = StockTransfer::query()->sole();
+        app(AgentToolExecutor::class)->execute('transfers.dispatch', ['transfer_id' => $created->id, 'dispatch_date' => '2026-08-18'], $master, true);
         $this->assertSame('220.000000', $balances->balance($product, $factory));
+        $this->assertSame('0.000000', $balances->balance($product, $ibira));
+        app(AgentToolExecutor::class)->execute('transfers.receive', ['transfer_id' => $created->id, 'received_date' => '2026-08-18', 'quantity_received' => '80'], $master, true);
         $this->assertSame('80.000000', $balances->balance($product, $ibira));
         $this->assertSame('0.000000', $balances->balance($product, $catanduva));
         $this->assertDatabaseHas('authorization_audits', ['target_user_id' => $target->id, 'source' => 'agent']);

@@ -50,6 +50,14 @@ class CatalogAgentWorkflowService
 
     public function collect(PendingAgentAction $action, string $text, User $user): ErpAgentResponse
     {
+        if (($action->missing_fields[0] ?? null) === 'similarity_reviewed') {
+            if (mb_strtoupper(trim($text)) !== 'CRIAR NOVO') {
+                return ErpAgentResponse::error('Há produto semelhante no catálogo. Responda CRIAR NOVO somente se este cadastro for realmente distinto, ou CANCELAR.', 'similar_product_requires_clarification');
+            }
+            $action = $this->pending->merge($action, $user, ['similarity_reviewed' => true], array_values(array_diff($action->missing_fields, ['similarity_reviewed'])));
+
+            return $this->preview($action);
+        }
         if (preg_match('/(?:TROCA|ALTERA|CORRIGE)(?: O)? PREÇO(?: PARA)?\s*(?:R\$)?\s*([0-9]+(?:[.,][0-9]{1,4})?)/ui', $text, $matches) === 1) {
             $action = $this->pending->merge($action, $user, ['selling_price' => str_replace(',', '.', $matches[1])], array_values(array_diff($action->missing_fields ?? [], ['selling_price'])));
 
@@ -99,6 +107,20 @@ class CatalogAgentWorkflowService
     public function preview(PendingAgentAction $action): ErpAgentResponse
     {
         $payload = $action->payload;
+        if ($action->tool_name === 'catalog.products.create' && filled($payload['name'] ?? null)) {
+            $normalized = $this->products->normalize((string) $payload['name']);
+            $exact = Product::query()->get()->first(fn (Product $product) => $this->products->normalize($product->name) === $normalized);
+            if ($exact !== null) {
+                return ErpAgentResponse::error('Já existe o produto oficial "'.$exact->name.'". Edite o cadastro existente ou cancele esta ação.', 'product_already_exists');
+            }
+            $match = $this->products->matchItems([['product_name' => $payload['name']]])[0]['_product_match'] ?? null;
+            if ($match !== null && ($match['candidates'] ?? []) !== [] && ! ($payload['similarity_reviewed'] ?? false)) {
+                $action->update(['missing_fields' => array_values(array_unique([...($action->missing_fields ?? []), 'similarity_reviewed']))]);
+                $names = collect($match['candidates'])->pluck('name')->implode(', ');
+
+                return new ErpAgentResponse(true, 'Encontrei produto semelhante: '.$names.'. Se for realmente outro produto, responda CRIAR NOVO. Caso contrário, responda CANCELAR.', 'menu', pendingAction: ['id' => $action->id]);
+            }
+        }
         $title = match (true) {
             $action->tool_name === 'catalog.products.create' => 'NOVO PRODUTO',
             $action->tool_name === 'catalog.products.update_price' => 'ALTERAÇÃO DE PREÇO',

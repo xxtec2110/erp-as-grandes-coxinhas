@@ -10,6 +10,7 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 class PurchaseReceiptService
 {
@@ -25,6 +26,23 @@ class PurchaseReceiptService
 
     public function receivePartial(PurchaseDocument $document, string $receivedDate, array $quantities, string $idempotencyKey, User $user, string $source = 'web'): PurchaseDocument
     {
+        $validator = Validator::make([
+            'received_date' => $receivedDate,
+            'quantities' => $quantities,
+            'idempotency_key' => $idempotencyKey,
+        ], [
+            'received_date' => ['required', 'date'],
+            'quantities' => ['required', 'array', 'min:1'],
+            'quantities.*' => ['nullable', 'decimal:0,6', 'gte:0'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $validated = $validator->validated();
+        $receivedDate = $validated['received_date'];
+        $quantities = $validated['quantities'];
+        $idempotencyKey = $validated['idempotency_key'];
         $this->authorization->authorize($user, 'purchases.receive', $document->location_id);
 
         return DB::transaction(function () use ($document, $receivedDate, $quantities, $idempotencyKey, $user, $source) {

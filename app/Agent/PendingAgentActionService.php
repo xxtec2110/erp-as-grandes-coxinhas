@@ -74,7 +74,7 @@ class PendingAgentActionService
 
     private function authorizeActor(PendingAgentAction $action, User $user): void
     {
-        if ($action->user_id !== $user->id) {
+        if ($action->user_id !== $user->id || ! $user->fresh()?->active) {
             throw new AuthorizationException('A ação pertence a outro usuário.');
         }
     }

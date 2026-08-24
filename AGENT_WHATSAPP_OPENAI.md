@@ -40,6 +40,14 @@ O ERP é a fonte oficial de estoque, catálogo, preço, venda e financeiro. Gran
 | `pdv.health` | `PdvHealthService` | `pdv.manage` | obrigatória |
 | `pdv.reconciliation` | `PdvSalesReconciliationService` | `pdv.manage` | obrigatória |
 | `products.prices.query` | `Product` / `ProductPrice` oficiais | `products.view` | global |
+| `products.catalog.query` | `AgentOperationalReadService` / catálogo oficial | `products.view` | global |
+| `ingredients.catalog.query` | `Ingredient` / `IngredientPrice` oficiais | `ingredients.view` | global |
+| `suppliers.catalog.query` | `Supplier` oficial | `suppliers.view` | global |
+| `purchases.documents.list/get`, `purchases.items.list`, `purchases.history`, `purchases.summary` | `PurchaseQueryService` | `purchases.view` | por acesso do usuário |
+| `finance.payables.list/get`, `finance.payments.list` | `FinanceQueryService` | permissões financeiras específicas | por acesso do usuário |
+| `production.orders.query` | `ProductionQueryService` / `ProductionOrder` | `production.orders.view` | obrigatória |
+| `losses.query` | `ProductLossQueryService` | `losses.view` | obrigatória |
+| `transfers.list` | `StockTransferQueryService` | `transfers.view` | obrigatória |
 
 As Tools recebem contratos restritos. Períodos relativos são resolvidos no backend no timezone `America/Sao_Paulo`; períodos personalizados exigem `from` e `to` no formato `AAAA-MM-DD`. Produto usa nome oficial ou alias exato. Similaridade apenas produz pedido de esclarecimento.
 
@@ -59,6 +67,25 @@ ErpAgentService
 ```
 
 A ação guarda usuário, conversa, unidade/parâmetros, expiração, status e chave de idempotência. Confirmação repetida não duplica a operação. Ação expirada recebe status `expired`, não executa e exige novo comando. Uma identidade/conversa não enxerga a pendência de outra.
+
+Na confirmação, o backend revalida usuário ativo, permissão, unidades, entidade, estado operacional e saldo. Mais de uma pendência na mesma conversa nunca é escolhida implicitamente por uma resposta como “sim”.
+
+### Write Tools operacionais
+
+| Domínio | Tools | Service oficial | Efeito após confirmação |
+|---|---|---|---|
+| Produtos | `catalog.products.create/update/update_price`, `catalog.product_aliases.create` | `ProductCatalogService` / `ProductPriceService` | cadastro ou novo evento de preço; histórico preservado |
+| Insumos | `catalog.ingredients.create/update`, `catalog.ingredient_prices.add` | `IngredientCatalogService` / `IngredientPriceService` | cadastro ou novo preço normalizado; histórico preservado |
+| Fornecedores | `catalog.suppliers.create/update` | `SupplierCatalogService` | cadastro validado, sem duplicidade normalizada/CNPJ |
+| Compras | `purchases.documents.create` | `CreatePurchaseDocumentService` | cria documento e histórico de custo; não movimenta estoque |
+| Recebimentos | `purchases.receipts.receive` | `PurchaseReceiptService` | recebimento total/parcial idempotente e movimento oficial de insumo |
+| Contas a pagar | `finance.payables.create` | `CreatePayableService` | cria conta pendente validada |
+| Pagamentos | `finance.payments.record` | `RegisterPaymentService` | pagamento total/parcial, limitado ao saldo remanescente |
+| Produção | `production.orders.plan`, `production.orders.complete_batch` | `ProductionOrderService` | snapshot da ficha; conclusão consome insumos e adiciona produto |
+| Perdas | `losses.record` | `ProductLossService` | movimento oficial negativo após revalidar saldo |
+| Transferências | `transfers.create`, `transfers.dispatch`, `transfers.receive` | `StockTransferService` | cria pendência; saída só na expedição; entrada só no recebimento |
+
+`transfers.complete` permanece compatível com fluxos internos existentes, mas o Agente orienta e inicia novas transferências pelo ciclo criar → expedir → receber. `stock.opening_balance.record` continua excepcional e protegido por permissão própria.
 
 ## OpenAI
 
@@ -86,13 +113,13 @@ A ação guarda usuário, conversa, unidade/parâmetros, expiração, status e c
 - Áudio: download seguro, armazenamento privado, transcrição fake/OpenAI, cache por hash, custo e envio do texto transcrito ao mesmo agente.
 - Imagem/PDF: anexos privados, autorização por usuário/unidade e interpretação estruturada existente.
 - Documentos e imagens são conteúdo não confiável. Instruções encontradas dentro deles não substituem system prompt, autorização ou confirmação.
-- Este incremento não cria novo workflow financeiro de documentos.
+- Imagem e PDF podem gerar somente interpretação, rascunho/prévia e ação pendente. Nenhum documento, preço, recebimento ou pagamento é gravado sem confirmação humana posterior.
 
 ## Auditoria, observabilidade e erros
 
 `AgentEvent`, conversas, mensagens, pending actions, custos, inbox e outbox permitem rastrear mensagem, Tool, unidade, resultado, resposta, retry e falha sem registrar credenciais.
 
-A área administrativa existente mostra provider/modelo, mensagens, Tools, custos, falhas, retries e ações pendentes/confirmadas/expiradas. Respostas operacionais nunca incluem tokens, credenciais do PDV, cookies ou segredos de integração.
+A área administrativa existente mostra provider/modelo, mensagens, Tools, custos, falhas, retries, ações pendentes/confirmadas/expiradas e métricas por domínio operacional. Respostas operacionais usam DTOs explícitos ou apenas contagens; nunca incluem tokens, credenciais do PDV, cookies, notas internas ou segredos de integração.
 
 Falhas equivalentes cobertas: identidade desconhecida, canal não liberado, autorização negada, unidade ausente/ambígua/não autorizada, Tool não permitida, validação, provider indisponível, rate limit, confirmação pendente e ação expirada.
 
@@ -116,6 +143,9 @@ Credenciais ficam apenas no `.env` local/ambiente de execução e nunca em códi
 
 Os testes usam PostgreSQL de teste, fakes de OpenAI/WhatsApp e fixtures isoladas. Cobrem consultas, ausência de dados, multiunidade, permissão, adulteração de argumentos, identidade desconhecida, confirmação, ator incorreto, expiração, replay, retry, falha de provider, HMAC, limite de payload e segurança de mídia. Nenhum teste deve chamar OpenAI, Meta ou GrandChef reais.
 
-## Próximas Tools candidatas
+## Limites deliberados
 
-Após revisão deste macrobloco, priorizar consultas operacionais de compras e fornecedores, contas a pagar/pagamentos, produção, perdas, transferências e relatórios avançados. Escritas adicionais só devem ser expostas após contrato, permissão, prévia, confirmação e teste de idempotência específicos.
+- Não existe Tool genérica de SQL, edição direta de saldo ou escrita direta do modelo de IA.
+- O Agente não inventa ficha técnica, preço, fornecedor, conta, unidade, quantidade ou vínculo aproximado.
+- Cadastro/edição completa de ficha técnica permanece disponível somente quando o contrato oficial existente é inequívoco; snapshots históricos de produção nunca são reescritos.
+- Integrações OpenAI, Meta e GrandChef continuam sujeitas às flags e autorizações independentes já documentadas.

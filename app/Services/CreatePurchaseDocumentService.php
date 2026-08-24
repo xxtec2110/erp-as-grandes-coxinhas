@@ -9,6 +9,8 @@ use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class CreatePurchaseDocumentService
 {
@@ -16,6 +18,57 @@ class CreatePurchaseDocumentService
 
     public function create(array $data, User $user, string $source = 'web'): PurchaseDocument
     {
+        $data['currency'] ??= 'BRL';
+        $validator = Validator::make($data, [
+            'supplier_id' => ['nullable', 'exists:suppliers,id'],
+            'document_type' => ['required', Rule::in(['invoice', 'boleto', 'bill', 'receipt', 'proof', 'order', 'quote', 'other'])],
+            'document_number' => ['nullable', 'string', 'max:100'],
+            'series' => ['nullable', 'string', 'max:30'],
+            'access_key' => ['nullable', 'string', 'max:80'],
+            'issue_date' => ['required', 'date'],
+            'due_date' => ['nullable', 'date'],
+            'currency' => ['required', Rule::in(['BRL'])],
+            'gross_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'discount_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'freight_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'other_charges_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'net_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'total_amount' => ['required', 'decimal:0,2', 'gt:0'],
+            'location_id' => ['required', 'exists:locations,id'],
+            'cost_center_id' => ['nullable', 'exists:cost_centers,id'],
+            'finance_category_id' => ['nullable', 'exists:finance_categories,id'],
+            'agent_attachment_id' => ['nullable', 'exists:agent_attachments,id'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'idempotency_key' => ['required', 'string', 'max:190'],
+            'items' => ['nullable', 'array'],
+            'items.*.ingredient_id' => ['nullable', 'exists:ingredients,id'],
+            'items.*.product_id' => ['nullable', 'exists:products,id'],
+            'items.*.external_code' => ['nullable', 'string', 'max:100'],
+            'items.*.description' => ['required', 'string', 'max:255'],
+            'items.*.quantity' => ['required', 'decimal:0,6', 'gt:0'],
+            'items.*.unit' => ['required', Rule::in(['kg', 'g', 'l', 'ml', 'un'])],
+            'items.*.package_quantity' => ['nullable', 'decimal:0,6', 'gt:0'],
+            'items.*.package_size' => ['nullable', 'decimal:0,6', 'gt:0'],
+            'items.*.package_unit' => ['nullable', Rule::in(['kg', 'g', 'l', 'ml', 'un'])],
+            'items.*.unit_price' => ['nullable', 'decimal:0,6', 'gte:0'],
+            'items.*.unit_price_original' => ['nullable', 'decimal:0,6', 'gte:0'],
+            'items.*.package_price' => ['nullable', 'decimal:0,4', 'gte:0'],
+            'items.*.total_price' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'items.*.gross_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'items.*.discount_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'items.*.freight_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'items.*.other_charges_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+            'items.*.net_amount' => ['nullable', 'decimal:0,2', 'gte:0'],
+        ]);
+        if ($validator->fails()) {
+            throw new DomainException($validator->errors()->first());
+        }
+        $data = $validator->validated();
+        foreach ($data['items'] ?? [] as $item) {
+            if (! isset($item['total_price']) && ! isset($item['net_amount']) && ! isset($item['gross_amount']) && ! isset($item['unit_price']) && ! isset($item['unit_price_original'])) {
+                throw new DomainException('Cada item da compra exige um preço ou total válido.');
+            }
+        }
         $this->auth->authorize($user, 'purchases.create', (int) $data['location_id']);
         if (isset($data['agent_attachment_id'])) {
             $this->attachments->authorizeLink((int) $data['agent_attachment_id'], 'purchase', (int) $data['location_id'], $user);
