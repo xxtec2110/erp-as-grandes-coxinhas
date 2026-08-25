@@ -41,7 +41,7 @@ class WhatsAppChannelTest extends TestCase
     {
         parent::setUp();
         $this->seed(AuthorizationSeeder::class);
-        config()->set(['whatsapp.enabled' => true, 'whatsapp.verify_token' => 'safe-test-token', 'whatsapp.app_secret' => 'safe-test-secret', 'whatsapp.client' => 'fake', 'whatsapp.max_send_attempts' => 3, 'queue.default' => 'sync']);
+        config()->set(['whatsapp.enabled' => true, 'whatsapp.verify_token' => 'safe-test-token', 'whatsapp.app_secret' => 'safe-test-secret', 'whatsapp.client' => 'fake', 'whatsapp.phone_number_id' => 'phone-test', 'whatsapp.max_send_attempts' => 3, 'queue.default' => 'sync']);
         $this->client = new FakeWhatsAppClient;
         $this->app->instance(WhatsAppClientInterface::class, $this->client);
     }

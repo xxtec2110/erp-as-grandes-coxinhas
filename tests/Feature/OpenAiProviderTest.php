@@ -28,6 +28,7 @@ class OpenAiProviderTest extends TestCase
         $this->assertSame(17, $result->usage['input_tokens']);
         $this->assertSame(5, $result->usage['cached_input_tokens']);
         Http::assertSent(fn (Request $request) => $request['model'] === 'text-test'
+            && $request['store'] === false
             && data_get($request->data(), 'text.format.type') === 'json_schema'
             && data_get($request->data(), 'text.format.strict') === false
             && str_contains($request['instructions'], 'expected_amount')

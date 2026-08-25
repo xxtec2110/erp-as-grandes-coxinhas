@@ -25,7 +25,7 @@ class WhatsAppMessageNormalizer
                     $events[] = ['type' => 'message', 'external_event_id' => $message['id'], 'message' => new AgentMessage(
                         'whatsapp', (string) $message['from'], (string) $message['id'], $this->text($message, $type), $type,
                         $this->attachments($message, $type), $message['context']['id'] ?? null,
-                        array_filter(['display_name' => $contact['profile']['name'] ?? null, 'phone_number_id' => $phoneNumberId, 'provider' => 'meta', 'instance' => $phoneNumberId, 'context_from' => $message['context']['from'] ?? null], fn ($item) => $item !== null),
+                        array_filter(['display_name' => $contact['profile']['name'] ?? null, 'phone_number_id' => $phoneNumberId, 'business_phone_number' => $value['metadata']['display_phone_number'] ?? null, 'provider' => 'meta', 'instance' => $phoneNumberId, 'context_from' => $message['context']['from'] ?? null], fn ($item) => $item !== null),
                         isset($message['timestamp']) ? new DateTimeImmutable('@'.(int) $message['timestamp']) : null,
                     )];
                 }

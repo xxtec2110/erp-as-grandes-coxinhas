@@ -94,6 +94,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/configuracoes/agente/interacoes/{conversation}', [AgentAdministrationController::class, 'interaction'])->middleware('permission:users.manage')->name('agent.interactions.show');
     Route::get('/configuracoes/agente/whatsapp', [WhatsAppConnectionController::class, 'index'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.index');
     Route::post('/configuracoes/agente/whatsapp/verificar', [WhatsAppConnectionController::class, 'check'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.check');
+    Route::put('/configuracoes/agente/whatsapp/numero-empresarial', [WhatsAppConnectionController::class, 'updateBusinessPhone'])->middleware('permission:agent.whatsapp.manage_connection')->name('agent.whatsapp.business-phone.update');
     Route::get('/configuracoes/integracoes/pdv', fn (): RedirectResponse => redirect()->route('pdv.index'))->middleware('permission:pdv.manage')->name('pdv.legacy-index');
     Route::get('/configuracoes/integracoes/grandchef', [PdvIntegrationController::class, 'index'])->middleware('permission:pdv.manage')->name('pdv.index');
     Route::get('/configuracoes/integracoes/grandchef/unidades/{location}/criar', [GrandChefConnectionController::class, 'create'])->middleware('permission:pdv.manage')->name('pdv.connections.create');

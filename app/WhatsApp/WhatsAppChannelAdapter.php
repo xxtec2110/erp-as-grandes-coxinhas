@@ -12,6 +12,7 @@ use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AgentMediaService;
 use App\Services\WhatsAppConnectionService;
+use App\Services\WhatsAppDestinationGuard;
 use App\Services\WhatsAppIdentityResolver;
 use DomainException;
 use Illuminate\Support\Facades\RateLimiter;
@@ -31,6 +32,7 @@ class WhatsAppChannelAdapter
         private AgentMediaService $media,
         private WhatsAppIdentityResolver $identities,
         private AgentAccessPolicy $access,
+        private WhatsAppDestinationGuard $destination,
     ) {}
 
     public function handle(array $payload, int $attempt = 1, bool $finalAttempt = false, int $retryDelay = 5): void
@@ -62,6 +64,12 @@ class WhatsAppChannelAdapter
             }
 
             $message = $item['message'];
+            if (($destinationError = $this->destination->rejectionReason($message)) !== null) {
+                $this->events->record('whatsapp_inbound_blocked', 'whatsapp', messageId: $message->externalMessageId, status: 'blocked', errorCode: $destinationError, metadata: ['ai_used' => false, 'media_downloaded' => false]);
+                $event->update(['status' => 'processed', 'error_code' => $destinationError]);
+
+                continue;
+            }
             $resolution = $this->identities->resolve($message->externalUserId);
             if (! $resolution->authorized()) {
                 $this->events->record('whatsapp_inbound_blocked', 'whatsapp', messageId: $message->externalMessageId, status: 'blocked', errorCode: $resolution->status, metadata: ['identifier_hash' => hash('sha256', (string) ($resolution->normalized ?? $message->externalUserId)), 'ai_used' => false, 'media_downloaded' => false]);
