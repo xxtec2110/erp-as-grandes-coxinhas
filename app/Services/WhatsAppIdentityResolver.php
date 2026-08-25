@@ -11,22 +11,27 @@ class WhatsAppIdentityResolver
 
     public function resolve(string $externalIdentifier): WhatsAppIdentityResolution
     {
-        $exact = UserExternalIdentity::query()->with(['user.roles', 'user.permissions', 'user.locations'])
-            ->where('channel', 'whatsapp')->where('external_user_id', $externalIdentifier)->first();
         try {
             $normalized = $this->phones->normalize($externalIdentifier);
         } catch (DomainException) {
-            return $exact === null ? new WhatsAppIdentityResolution('invalid_identifier') : $this->classify($exact);
+            $identity = UserExternalIdentity::query()->with(['user.roles', 'user.permissions', 'user.locations'])
+                ->where('channel', 'whatsapp')->where('external_user_id', $externalIdentifier)
+                ->orderByDesc('active')->latest('id')->first();
+
+            return $identity === null ? new WhatsAppIdentityResolution('invalid_identifier') : $this->classify($identity);
         }
 
-        $identity = $exact ?? UserExternalIdentity::query()
+        $identity = UserExternalIdentity::query()
             ->with(['user.roles', 'user.permissions', 'user.locations'])
             ->where('channel', 'whatsapp')
             ->where(function ($query) use ($externalIdentifier, $normalized): void {
                 $query->where('phone_normalized', $normalized)
                     ->orWhere('external_user_id', $externalIdentifier)
                     ->orWhere('external_user_id', ltrim($normalized, '+'));
-            })->first();
+            })
+            ->orderByDesc('active')
+            ->latest('id')
+            ->first();
 
         if ($identity === null) {
             return new WhatsAppIdentityResolution('unknown_identity', normalized: $normalized);
@@ -42,6 +47,9 @@ class WhatsAppIdentityResolver
         }
         if ($identity->user === null || ! $identity->user->active) {
             return new WhatsAppIdentityResolution('inactive_user', $identity, $normalized);
+        }
+        if (! $identity->respond_enabled) {
+            return new WhatsAppIdentityResolution('response_disabled', $identity, $normalized);
         }
 
         return new WhatsAppIdentityResolution('authorized', $identity, $normalized);

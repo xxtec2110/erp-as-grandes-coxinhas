@@ -53,9 +53,15 @@ use App\Http\Controllers\StockTransferController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\UserAccessController;
 use App\Http\Controllers\WhatsAppConnectionController;
+use App\Models\UserExternalIdentity;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\View;
+
+Route::bind('identity', fn (string $value): UserExternalIdentity => UserExternalIdentity::query()
+    ->whereKey($value)
+    ->where('channel', 'whatsapp')
+    ->firstOrFail());
 
 Route::get('/', function (): View|RedirectResponse {
     return auth()->check()

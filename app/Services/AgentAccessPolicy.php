@@ -11,7 +11,7 @@ class AgentAccessPolicy
 
     public function canUse(UserExternalIdentity $identity, string $messageType): bool
     {
-        if (! $identity->active || $identity->status !== 'approved' || ! $identity->user?->active) {
+        if (! $identity->active || ! $identity->respond_enabled || $identity->status !== 'approved' || ! $identity->user?->active) {
             return false;
         }
         [$flag, $permission] = match ($messageType) {

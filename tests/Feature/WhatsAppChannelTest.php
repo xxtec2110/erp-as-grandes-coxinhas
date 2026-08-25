@@ -66,7 +66,7 @@ class WhatsAppChannelTest extends TestCase
     public function test_approved_identity_receives_authorized_text_menu(): void
     {
         $this->known('551100000001', ['stock.view']);
-        $this->send('wamid.menu', '551100000001', 'OI');
+        $this->send('wamid.menu', '551100000001', 'MENU');
 
         $this->assertCount(1, $this->client->sent());
         $this->assertStringContainsString('Consultar estoque', $this->client->sent()[0]['text']);

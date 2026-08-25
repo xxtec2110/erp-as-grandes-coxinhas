@@ -10,6 +10,7 @@ Receber uma mensagem no número do WhatsApp não concede acesso ao ERP. A ordem 
 
 - o telefone foi normalizado para o formato canônico internacional;
 - existe identidade WhatsApp ativa e aprovada;
+- `respond_enabled` está habilitado;
 - a identidade está vinculada a um `User` ativo;
 - a política do canal permite o tipo de mensagem;
 - as permissões atuais do `User` permitem a operação e a unidade.
@@ -23,13 +24,15 @@ O telefone responde apenas quem é a pessoa. Roles, permissões individuais e es
 - o mesmo telefone ativo em dois usuários;
 - dois telefones WhatsApp ativos para o mesmo usuário.
 
-Trocar o telefone desativa o anterior, ativa uma nova identidade e invalida ações WhatsApp pendentes do usuário.
+Trocar o telefone desativa o vínculo anterior, cria uma nova identidade e invalida somente as ações pendentes iniciadas naquele vínculo. O histórico anterior não é reatribuído. Um telefone desativado pode ser vinculado explicitamente a outra pessoa; o resolver sempre prioriza o único vínculo ativo e o índice parcial continua impedindo dois usuários ativos com o mesmo número.
+
+Reassociar uma identidade a outro usuário também preserva o registro anterior: ele é desativado, suas pendências são canceladas e um novo vínculo auditado é criado. Conversas e ações antigas mantêm o ator original.
 
 ## Fluxo inbound
 
 `WhatsAppChannelAdapter` usa `WhatsAppIdentityResolver` e `AgentAccessPolicy` antes de registrar custo, persistir mensagem operacional ou preparar mídia. O fluxo é fail-closed.
 
-Contatos desconhecidos, identidades inativas e usuários inativos:
+Contatos desconhecidos, identidades inativas, usuários inativos e identidades com respostas desabilitadas:
 
 - não recebem resposta automática por padrão;
 - não criam identidade pendente automaticamente;
@@ -39,6 +42,8 @@ Contatos desconhecidos, identidades inativas e usuários inativos:
 - não entram nas métricas de produtividade ou custo do agente.
 
 É registrado somente um `AgentEvent` de segurança com motivo, horário, canal, ID da mensagem e hash do identificador. O conteúdo e o telefone completo não são armazenados nesse evento.
+
+**Regra definitiva:** mensagens de números não autorizados são rejeitadas antes de qualquer chamada à OpenAI, transcrição, visão, execução de Tool ou consulta ao ERP.
 
 ## Proveniência e loops
 
@@ -59,17 +64,31 @@ A identidade e a permissão do tipo de mídia são verificadas antes do download
 
 A política existente `ProductionUserPolicy` continua sendo aplicada depois da identidade e da autorização do canal. Ela não é contornada pela allowlist. Perfis restritos continuam limitados ao briefing, mídia e confirmações previstos no fluxo de produção.
 
-## Boas-vindas
+## Saudação, ajuda e boas-vindas
 
-O administrador pode solicitar boas-vindas para uma identidade ativa. Com o cliente fake, a mensagem é verificável localmente. Com Meta desabilitada, o pedido permanece registrado e nenhuma chamada externa é feita. O nome vem do `User`, nunca do perfil informado pelo WhatsApp.
+Saudações simples são respondidas por template local determinístico, usando o nome amigável da identidade e sem OpenAI. `MENU` abre somente os atalhos já autorizados. As perguntas “ajuda”, “o que você faz?” e “o que posso consultar?” geram categorias amigáveis derivadas em tempo real de `User → Permissions → AgentToolRegistry`; nomes internos de permissões e Tools não são enviados ao usuário.
+
+O administrador pode solicitar boas-vindas para uma identidade ativa, ligada a usuário ativo e com respostas habilitadas. Com o cliente fake, a mensagem é verificável localmente. Com Meta desabilitada, o pedido permanece registrado e nenhuma chamada externa é feita.
 
 ## Revogação, rate limit e ações pendentes
 
-Desativação e troca de telefone cancelam imediatamente ações pendentes associadas às conversas WhatsApp do usuário. O rate limit é aplicado por identidade autorizada antes do agente. Confirmações continuam protegidas por usuário, conversa, status e chave idempotente.
+Desativação, bloqueio de respostas, troca de telefone e troca de usuário cancelam imediatamente as ações pendentes associadas àquela identidade/conversa. O rate limit é aplicado por identidade autorizada antes do agente. Confirmações continuam protegidas por usuário, conversa, status e chave idempotente; múltiplas pendências nunca são escolhidas de forma arbitrária.
 
 ## Administração e privacidade
 
-As rotas administrativas exigem `whatsapp.identities.view` ou `whatsapp.identities.manage`. A listagem mascara o telefone. A página detalhada, acessível somente com permissão, mostra identidade, perfil, unidades, política do canal, permissões efetivas, ativação e boas-vindas.
+As rotas administrativas exigem `whatsapp.identities.view` ou `whatsapp.identities.manage`. A listagem mascara o telefone e permite busca por nome, usuário ou número. A página detalhada, acessível somente com permissão, mostra identidade, perfil, unidades, política do canal, categorias amigáveis calculadas, ativação e boas-vindas. Não existe exclusão administrativa: a revogação é feita por desativação, preservando auditoria.
+
+## Fluxo humano de ativação futura
+
+1. Criar ou selecionar o `User` oficial do ERP.
+2. Atribuir Roles/Permissions oficiais.
+3. Atribuir Locations oficiais.
+4. Cadastrar e normalizar o telefone WhatsApp.
+5. Vincular o telefone ao `User`.
+6. Ativar a identidade e o controle de resposta.
+7. Validar saudação e ajuda determinísticas.
+8. Validar uma consulta permitida e uma negada.
+9. Validar uma escrita com preview, PendingAction e confirmação.
 
 ## Mensagens manuais e contatos não autorizados
 

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Agent\AgentMessage;
+use App\Agent\AgentToolRegistry;
 use App\Agent\AiInterpretation;
 use App\Agent\AiProviderInterface;
 use App\Models\AgentAttachment;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\Storage;
 
 class AiInterpretationService
 {
-    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients, private IngredientSemanticResolver $ingredientResolver, private ProductMatchService $products) {}
+    public function __construct(private AiProviderInterface $provider, private AgentAttachmentService $attachments, private SupplierMatchService $suppliers, private IngredientMatchService $ingredients, private IngredientSemanticResolver $ingredientResolver, private ProductMatchService $products, private AgentToolRegistry $registry) {}
 
     public function interpret(AgentMessage $message, array $availableTools, User $user, array $conversationContext = []): ?AiInterpretation
     {
@@ -35,7 +36,7 @@ class AiInterpretationService
             return null;
         }
         if ($result->tool !== null && ! in_array($result->tool, $availableTools, true)) {
-            throw new DomainException('ai_tool_not_allowed');
+            throw new DomainException($this->registry->get($result->tool) === null ? 'ai_tool_unknown' : 'ai_tool_not_allowed');
         }
         if ($result->tool === 'finance.payables.create' && isset($result->fields['amount']) && ! isset($result->fields['expected_amount'])) {
             $fields = $result->fields;

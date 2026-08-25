@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ExternalIdentityRequest;
+use App\Http\Requests\ReplaceExternalIdentityPhoneRequest;
 use App\Http\Requests\StoreExternalIdentityRequest;
 use App\Models\AgentConversation;
 use App\Models\AgentEvent;
@@ -11,6 +12,7 @@ use App\Models\PendingAgentAction;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Models\WhatsAppInboundMessage;
+use App\Services\AgentCapabilityService;
 use App\Services\AgentCostService;
 use App\Services\AuthorizationService;
 use App\Services\ExternalIdentityService;
@@ -24,9 +26,31 @@ use Illuminate\View\View;
 
 class AgentAdministrationController extends Controller
 {
-    public function identities(PhoneNumberNormalizer $phones): View
+    public function identities(Request $request, PhoneNumberNormalizer $phones, AuthorizationService $authorization): View
     {
-        return view('agent.identities.index', ['identities' => UserExternalIdentity::query()->with(['user.roles', 'user.locations'])->where('channel', 'whatsapp')->latest()->paginate(25), 'phones' => $phones, 'blockedCount' => AgentEvent::query()->where('event_type', 'whatsapp_inbound_blocked')->count()]);
+        $search = trim((string) $request->query('q', ''));
+        $identities = UserExternalIdentity::query()->with(['user.roles', 'user.locations'])->where('channel', 'whatsapp')
+            ->when($search !== '', function ($query) use ($search): void {
+                $digits = preg_replace('/\D+/', '', $search) ?? '';
+                $query->where(function ($query) use ($search, $digits): void {
+                    $query->whereLike('display_name', '%'.$search.'%')
+                        ->orWhereHas('user', fn ($user) => $user->whereLike('name', '%'.$search.'%'));
+                    if ($digits !== '') {
+                        $query->orWhere('phone_normalized', 'like', '%'.$digits.'%')->orWhere('external_user_id', 'like', '%'.$digits.'%');
+                    }
+                });
+            })
+            ->latest()->paginate(25)->withQueryString();
+
+        $whatsAppIdentities = UserExternalIdentity::query()->where('channel', 'whatsapp');
+
+        return view('agent.identities.index', [
+            'identities' => $identities, 'phones' => $phones, 'search' => $search,
+            'activeCount' => (clone $whatsAppIdentities)->where('active', true)->count(),
+            'inactiveCount' => (clone $whatsAppIdentities)->where('active', false)->count(),
+            'blockedCount' => AgentEvent::query()->where('event_type', 'whatsapp_inbound_blocked')->count(),
+            'canManage' => $authorization->allows($request->user(), 'whatsapp.identities.manage'),
+        ]);
     }
 
     public function createIdentity(): View
@@ -45,16 +69,21 @@ class AgentAdministrationController extends Controller
         return redirect()->route('agent.identities.edit', $identity)->with('success', 'Acesso WhatsApp ativado.');
     }
 
-    public function editIdentity(UserExternalIdentity $identity, AuthorizationService $authorization): View
+    public function editIdentity(UserExternalIdentity $identity, AgentCapabilityService $capabilities, AuthorizationService $authorization): View
     {
         $identity->load(['user.roles', 'user.permissions', 'user.locations', 'approver']);
 
-        return view('agent.identities.edit', ['identity' => $identity, 'effective' => $identity->user ? $authorization->effectivePermissions($identity->user) : []]);
+        return view('agent.identities.edit', [
+            'identity' => $identity,
+            'capabilities' => $identity->user ? $capabilities->forUser($identity->user) : [],
+            'users' => User::query()->where('active', true)->with(['roles', 'locations'])->orderBy('name')->get(),
+            'canManage' => $authorization->allows(request()->user(), 'whatsapp.identities.manage'),
+        ]);
     }
 
-    public function replaceIdentityPhone(Request $request, UserExternalIdentity $identity, ExternalIdentityService $service): RedirectResponse
+    public function replaceIdentityPhone(ReplaceExternalIdentityPhoneRequest $request, UserExternalIdentity $identity, ExternalIdentityService $service): RedirectResponse
     {
-        $data = $request->validate(['phone' => ['required', 'string', 'max:30'], 'confirm_replace' => ['accepted']]);
+        $data = $request->validated();
         try {
             $replacement = $service->replacePhone($identity, $data['phone'], $request->user());
         } catch (DomainException $e) {
@@ -78,12 +107,12 @@ class AgentAdministrationController extends Controller
     public function updateIdentity(ExternalIdentityRequest $request, UserExternalIdentity $identity, ExternalIdentityService $service): RedirectResponse
     {
         try {
-            $service->update($identity, $request->validated(), $request->user());
+            $updated = $service->update($identity, $request->validated(), $request->user());
         } catch (DomainException $e) {
             throw ValidationException::withMessages(['user_id' => $e->getMessage()]);
         }
 
-        return back()->with('success', 'Identidade e acessos atualizados.');
+        return redirect()->route('agent.identities.edit', $updated)->with('success', 'Identidade e acessos atualizados.');
     }
 
     public function observability(AgentCostService $costs): View

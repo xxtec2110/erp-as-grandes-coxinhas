@@ -15,6 +15,7 @@ use App\Models\Supplier;
 use App\Models\User;
 use App\Models\UserExternalIdentity;
 use App\Services\AgentAccessManagementService;
+use App\Services\AgentCapabilityService;
 use App\Services\AgentCostService;
 use App\Services\AgentEventService;
 use App\Services\AiInterpretationService;
@@ -33,7 +34,7 @@ use Throwable;
 
 class ErpAgentService
 {
-    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver, private StockBalanceService $stockBalances) {}
+    public function __construct(private AgentConversationService $conversations, private PendingAgentActionService $pending, private CatalogAgentWorkflowService $catalogWorkflow, private DeterministicCommandParser $parser, private AiProviderInterface $ai, private AiInterpretationService $interpretations, private AgentToolRegistry $registry, private AgentToolExecutor $executor, private AuthorizationService $authorization, private AgentAccessManagementService $accessManagement, private DashboardUserVisibilityService $dashboardVisibility, private AgentResponseTemplate $templates, private AgentEventService $events, private UndoLastOperationService $undo, private AgentCostService $costs, private RestrictedProductionInteractionService $restrictedProduction, private WhatsAppIdentityResolver $identityResolver, private StockBalanceService $stockBalances, private AgentCapabilityService $capabilities) {}
 
     public function handle(AgentMessage $message): ErpAgentResponse
     {
@@ -44,7 +45,7 @@ class ErpAgentService
 
             return ErpAgentResponse::error('Usuário não identificado.', 'unknown_identity', 'unauthorized');
         }
-        if ($identity === null || ($resolution !== null && ! $resolution->authorized()) || ! $identity->active || $identity->status !== 'approved' || $identity->user === null || ! $identity->user->active) {
+        if ($identity === null || ($resolution !== null && ! $resolution->authorized()) || ! $identity->active || ! $identity->respond_enabled || $identity->status !== 'approved' || $identity->user === null || ! $identity->user->active) {
             $code = $resolution?->status === 'invalid_identifier' ? 'unknown_identity' : ($resolution?->status ?? 'unknown_identity');
 
             return ErpAgentResponse::error('Acesso não autorizado.', $code, 'unauthorized');
@@ -81,8 +82,14 @@ class ErpAgentService
             $this->events->record('action_denied', $message->channel, $user, $conversation->id, $message->externalMessageId);
             $response = ErpAgentResponse::error('Você não possui autorização para essa operação ou unidade.', 'forbidden', 'unauthorized');
         } catch (DomainException $exception) {
-            $this->events->record('tool_validation_failed', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'failed', errorCode: 'validation_error');
-            $response = ErpAgentResponse::error($exception->getMessage(), 'validation_error');
+            if ($exception->getMessage() === 'ai_tool_not_allowed') {
+                $this->events->record('action_denied', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'denied', errorCode: 'forbidden');
+
+                $response = ErpAgentResponse::error('Você não tem acesso a essa informação ou operação.', 'forbidden', 'unauthorized');
+            } else {
+                $this->events->record('tool_validation_failed', $message->channel, $user, $conversation->id, $message->externalMessageId, status: 'failed', errorCode: 'validation_error');
+                $response = ErpAgentResponse::error($exception->getMessage(), 'validation_error');
+            }
         } catch (Throwable) {
             $this->events->record('internal_error', $message->channel, $user, $conversation->id, $message->externalMessageId);
             $response = ErpAgentResponse::error('Não foi possível concluir a solicitação. Tente novamente.', 'internal_error');
@@ -127,8 +134,15 @@ class ErpAgentService
         if ($expired && in_array(mb_strtoupper($text), ['1', 'SIM', 'OK', 'CONFIRMAR', 'PODE CRIAR'], true)) {
             return ErpAgentResponse::error('Esta ação expirou e não foi executada. Envie o comando novamente.', 'action_expired');
         }
-        if (in_array(mb_strtoupper($text), ['OI', 'OLÁ', 'OLA', 'MENU', 'AJUDA'], true)) {
-            return $this->menu($user);
+        $normalizedText = rtrim($this->normalize($text), '?! .');
+        if (in_array($normalizedText, ['oi', 'ola', 'bom dia', 'boa tarde', 'boa noite'], true)) {
+            return $this->greeting($identity->display_name ?: $user->name);
+        }
+        if ($normalizedText === 'menu') {
+            return $this->menu($user, $identity->display_name);
+        }
+        if (in_array($normalizedText, ['ajuda', 'o que posso fazer', 'o que voce faz', 'o que posso consultar'], true)) {
+            return $this->help($user, $identity->display_name);
         }
         $intent = $this->parser->parse($text);
         if ($intent !== null) {
@@ -570,7 +584,7 @@ class ErpAgentService
         return new ErpAgentResponse(true, implode("\n", $lines), 'menu', pendingAction: ['id' => $action->id]);
     }
 
-    private function menu(User $user): ErpAgentResponse
+    private function menu(User $user, ?string $friendlyName = null): ErpAgentResponse
     {
         $options = [];
         foreach ([
@@ -592,7 +606,31 @@ class ErpAgentService
             default => 'Boa noite',
         };
 
-        return new ErpAgentResponse(true, $greeting.', '.$user->name."! 👋\n\nO que você deseja fazer?", 'menu', options: $options);
+        return new ErpAgentResponse(true, $greeting.', '.($friendlyName ?: $user->name)."! 👋\n\nO que você deseja fazer?", 'menu', options: $options);
+    }
+
+    private function greeting(string $name): ErpAgentResponse
+    {
+        $greeting = match (true) {
+            now()->hour < 12 => 'Bom dia',
+            now()->hour < 18 => 'Boa tarde',
+            default => 'Boa noite',
+        };
+
+        return new ErpAgentResponse(true, $greeting.', '.$name.'! Tudo bem? Como posso ajudar?', 'greeting');
+    }
+
+    private function help(User $user, ?string $friendlyName = null): ErpAgentResponse
+    {
+        $capabilities = $this->capabilities->forUser($user);
+        $message = 'Olá, '.($friendlyName ?: $user->name).'! Posso ajudar com as áreas liberadas para o seu usuário:';
+        if ($capabilities === []) {
+            $message .= "\n\nNenhuma área operacional está liberada no momento. Procure um administrador do ERP.";
+        } else {
+            $message .= "\n\n- ".implode("\n- ", $capabilities)."\n\nEnvie MENU para ver os comandos rápidos disponíveis.";
+        }
+
+        return new ErpAgentResponse(true, $message, 'help', data: ['capabilities' => $capabilities]);
     }
 
     private function submenu(string $name, User $user, AgentMessage $message, AgentConversation $conversation): ErpAgentResponse
