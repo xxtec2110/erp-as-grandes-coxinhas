@@ -1,7 +1,9 @@
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm install --ignore-scripts --include=optional
+RUN npm install --ignore-scripts --include=optional \
+    && npm install --no-save --ignore-scripts \
+        @rolldown/binding-linux-x64-gnu@1.2.3
 COPY resources ./resources
 COPY vite.config.js ./
 RUN npm run build
