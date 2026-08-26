@@ -3,7 +3,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install --ignore-scripts --include=optional \
     && npm install --no-save --ignore-scripts \
-        @rolldown/binding-linux-x64-gnu@1.2.3
+        @rolldown/binding-linux-x64-gnu@1.2.3 \
+        lightningcss-linux-x64-gnu@1.33.0 \
+        @tailwindcss/oxide-linux-x64-gnu@4.3.3
 COPY resources ./resources
 COPY vite.config.js ./
 RUN npm run build
