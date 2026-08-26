@@ -69,6 +69,9 @@ Route::get('/', function (): View|RedirectResponse {
         : view('auth.login');
 })->name('home');
 
+Route::view('/politica-de-privacidade', 'legal.privacy')
+    ->name('privacy-policy');
+
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
