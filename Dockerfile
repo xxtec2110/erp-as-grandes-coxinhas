@@ -32,11 +32,12 @@ COPY --from=vendor --chown=www-data:www-data /app/vendor ./vendor
 COPY --from=frontend --chown=www-data:www-data /app/public/build ./public/build
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY --chown=root:root docker/entrypoint.sh /usr/local/bin/erp-entrypoint
-RUN chmod +x /usr/local/bin/erp-entrypoint \
+COPY --chown=root:root docker/healthcheck.sh /usr/local/bin/erp-healthcheck
+RUN chmod +x /usr/local/bin/erp-entrypoint /usr/local/bin/erp-healthcheck \
     && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
     && composer check-platform-reqs --no-dev
 EXPOSE 80
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://127.0.0.1/up || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["erp-healthcheck"]
 ENTRYPOINT ["erp-entrypoint"]
 CMD ["apache2-foreground"]
