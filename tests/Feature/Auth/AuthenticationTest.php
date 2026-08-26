@@ -18,6 +18,16 @@ class AuthenticationTest extends TestCase
             ->assertSee('Acesse sua conta');
     }
 
+    public function test_login_assets_use_forwarded_https_scheme_behind_the_reverse_proxy(): void
+    {
+        $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.10'])
+            ->withHeader('X-Forwarded-Proto', 'https')
+            ->get('/login')
+            ->assertOk()
+            ->assertSee('https://localhost/build/assets/', false)
+            ->assertDontSee('http://localhost/build/assets/', false);
+    }
+
     public function test_user_can_authenticate_with_valid_credentials(): void
     {
         $user = User::factory()->create();
